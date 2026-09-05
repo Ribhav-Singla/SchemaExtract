@@ -1,6 +1,14 @@
+import os from "node:os";
+import path from "node:path";
+
 import pdf from "pdf-parse";
-import { pipeline } from "@huggingface/transformers";
+import { env, pipeline } from "@huggingface/transformers";
 import { createServerLogger, type ServerLogger } from "@/lib/logger";
+
+// Serverless platforms (e.g. Vercel) ship a read-only deployment bundle, so
+// the model cache can't live inside node_modules. /tmp is the only writable
+// directory available at runtime, so redirect the cache there everywhere.
+env.cacheDir = path.join(os.tmpdir(), "transformers-cache");
 
 type Section = {
   section_id: number;

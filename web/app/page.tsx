@@ -2,6 +2,30 @@
 
 import { FormEvent, useMemo, useRef, useState } from "react";
 
+interface ExtractionUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+interface ExtractionChoice {
+  finish_reason: string;
+  index: number;
+  message: {
+    content: string;
+  };
+}
+
+interface ExtractionResponse {
+  choices?: ExtractionChoice[];
+  usage?: ExtractionUsage;
+  response?: Record<string, unknown>;
+  model?: string;
+  created?: number;
+  id?: string;
+  [key: string]: unknown;
+}
+
 const EXAMPLE_SCHEMA = `{
   "research_area": "",
   "application": "",
@@ -49,11 +73,13 @@ export default function Home() {
   const [pdf, setPdf] = useState<File | null>(null);
   const [schema, setSchema] = useState(EXAMPLE_SCHEMA);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [extractionResult, setExtractionResult] = useState<ExtractionResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"all" | "top">("all");
+  const [resultTab, setResultTab] = useState<"chunks" | "extraction">("chunks");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const schemaIsValid = useMemo(() => {
@@ -78,8 +104,10 @@ export default function Home() {
     event.preventDefault();
     setError("");
     setResult(null);
+    setExtractionResult(null);
     setCopied(false);
     setActiveTab("all");
+    setResultTab("chunks");
 
     if (!pdf) {
       setError("Choose a PDF first.");
@@ -108,6 +136,29 @@ export default function Home() {
       }
 
       setResult(body);
+
+      // Send chunks to extraction API via backend proxy
+      const chunksToSend = activeTab === "all" ? body.chunks : body.ranked_chunks;
+      const extractionPayload = {
+        user_schema: JSON.parse(schema),
+        user_content: chunksToSend,
+      };
+
+      const extractionResponse = await fetch("/api/extract", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(extractionPayload),
+      });
+
+      const extractionData = await extractionResponse.json();
+
+      if (!extractionResponse.ok) {
+        throw new Error(extractionData.error ?? "Extraction failed");
+      }
+
+      setExtractionResult(extractionData);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Analysis failed");
     } finally {
@@ -326,31 +377,104 @@ export default function Home() {
             <div className="mt-6 flex gap-6 border-b border-[#202522]/15">
               <button
                 type="button"
-                onClick={() => setActiveTab("all")}
+                onClick={() => setResultTab("chunks")}
                 className={`-mb-px border-b-2 pb-3 text-sm font-semibold uppercase tracking-wide transition ${
-                  activeTab === "all"
+                  resultTab === "chunks"
                     ? "border-[#b45d38] text-[#202522]"
                     : "border-transparent text-[#58615b] hover:text-[#202522]"
                 }`}
               >
-                All chunks
+                Chunks Analysis
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("top")}
-                className={`-mb-px border-b-2 pb-3 text-sm font-semibold uppercase tracking-wide transition ${
-                  activeTab === "top"
-                    ? "border-[#b45d38] text-[#202522]"
-                    : "border-transparent text-[#58615b] hover:text-[#202522]"
-                }`}
-              >
-                Top matches
-              </button>
+              {extractionResult && (
+                <button
+                  type="button"
+                  onClick={() => setResultTab("extraction")}
+                  className={`-mb-px border-b-2 pb-3 text-sm font-semibold uppercase tracking-wide transition ${
+                    resultTab === "extraction"
+                      ? "border-[#b45d38] text-[#202522]"
+                      : "border-transparent text-[#58615b] hover:text-[#202522]"
+                  }`}
+                >
+                  Schema Extraction
+                </button>
+              )}
             </div>
 
-            <pre className="mt-4 max-h-[32rem] overflow-auto bg-white p-5 text-xs leading-5 shadow-sm ring-1 ring-[#202522]/10">
-              {JSON.stringify(activeJson, null, 2)}
-            </pre>
+            {resultTab === "chunks" && (
+              <div>
+                <div className="mt-6 flex gap-6 border-b border-[#202522]/15">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("all")}
+                    className={`-mb-px border-b-2 pb-3 text-sm font-semibold uppercase tracking-wide transition ${
+                      activeTab === "all"
+                        ? "border-[#b45d38] text-[#202522]"
+                        : "border-transparent text-[#58615b] hover:text-[#202522]"
+                    }`}
+                  >
+                    All chunks
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("top")}
+                    className={`-mb-px border-b-2 pb-3 text-sm font-semibold uppercase tracking-wide transition ${
+                      activeTab === "top"
+                        ? "border-[#b45d38] text-[#202522]"
+                        : "border-transparent text-[#58615b] hover:text-[#202522]"
+                    }`}
+                  >
+                    Top matches
+                  </button>
+                </div>
+
+                <pre className="mt-4 max-h-[32rem] overflow-auto bg-white p-5 text-xs leading-5 shadow-sm ring-1 ring-[#202522]/10">
+                  {JSON.stringify(activeJson, null, 2)}
+                </pre>
+              </div>
+            )}
+
+            {resultTab === "extraction" && extractionResult && (
+              <div>
+                <div className="mt-6 grid gap-4">
+                  {extractionResult.response && (
+                    <div className="bg-white p-5 shadow-sm ring-1 ring-[#202522]/10">
+                      <h3 className="font-semibold text-[#202522]">Extracted Schema</h3>
+                      <pre className="mt-3 max-h-[24rem] overflow-auto text-xs leading-5 text-[#202522]">
+                        {JSON.stringify(extractionResult.response, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {extractionResult.usage && (
+                    <div className="bg-white p-5 shadow-sm ring-1 ring-[#202522]/10">
+                      <h3 className="font-semibold text-[#202522]">API Usage</h3>
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className="flex justify-between border-b border-[#202522]/10 pb-2">
+                          <span className="text-[#58615b]">Prompt tokens</span>
+                          <span className="font-mono font-semibold text-[#202522]">{extractionResult.usage.prompt_tokens}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-[#202522]/10 pb-2">
+                          <span className="text-[#58615b]">Completion tokens</span>
+                          <span className="font-mono font-semibold text-[#202522]">{extractionResult.usage.completion_tokens}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold">
+                          <span className="text-[#202522]">Total tokens</span>
+                          <span className="font-mono text-[#b45d38]">{extractionResult.usage.total_tokens}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {extractionResult.choices && extractionResult.choices[0]?.message?.content && (
+                    <div className="bg-white p-5 shadow-sm ring-1 ring-[#202522]/10">
+                      <h3 className="font-semibold text-[#202522]">Full Response</h3>
+                      <pre className="mt-3 max-h-[24rem] overflow-auto bg-[#f4f1ea] p-3 text-xs leading-6 text-[#202522] whitespace-pre-wrap break-words">
+                        {JSON.stringify(extractionResult, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
         )}
       </section>

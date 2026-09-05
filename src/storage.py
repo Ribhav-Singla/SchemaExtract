@@ -28,3 +28,13 @@ def save_chunks(chunks: list[dict], output_path: Path) -> None:
         encoding="utf-8",
     )
     print(f"Chunks saved: {output_path}")
+
+
+def save_json(data, output_path: Path, label: str) -> None:
+    """Save an intermediate pipeline result as formatted JSON."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(f"{label} saved: {output_path}")

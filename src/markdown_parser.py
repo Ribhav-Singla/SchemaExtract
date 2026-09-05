@@ -18,8 +18,24 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def split_into_sections(markdown: str) -> list[dict]:
-    """Split Markdown into logical sections based on headings."""
+def find_headers(markdown: str) -> list[dict]:
+    """Find Markdown headers once and retain their source line numbers."""
+    headers = []
+    for line_number, line in enumerate(markdown.splitlines(), start=1):
+        if is_heading(line):
+            headers.append({
+                "header_id": len(headers),
+                "heading": line.strip(),
+                "heading_level": heading_level(line),
+                "line_number": line_number,
+            })
+    return headers
+
+
+def split_into_sections(markdown: str, headers: list[dict] | None = None) -> list[dict]:
+    """Split Markdown into logical sections using the detected headers."""
+    headers = headers if headers is not None else find_headers(markdown)
+    header_lines = {header["line_number"]: header for header in headers}
     sections = []
     current_heading = "Document Start"
     current_level = 0
@@ -35,11 +51,12 @@ def split_into_sections(markdown: str) -> list[dict]:
                 "content": content,
             })
 
-    for line in markdown.splitlines():
-        if is_heading(line):
+    for line_number, line in enumerate(markdown.splitlines(), start=1):
+        if line_number in header_lines:
             save_section()
-            current_heading = line.strip()
-            current_level = heading_level(line)
+            header = header_lines[line_number]
+            current_heading = header["heading"]
+            current_level = header["heading_level"]
             current_lines = []
         else:
             current_lines.append(line)

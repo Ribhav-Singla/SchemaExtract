@@ -1,10 +1,10 @@
 import argparse
 from pathlib import Path
 
-from src.chunker import create_chunks
-from src.markdown_parser import split_into_sections
+from src.chunker import append_previous_text, create_chunks
+from src.markdown_parser import find_headers, split_into_sections
 from src.pdf import pdf_to_markdown
-from src.storage import save_chunks, save_markdown
+from src.storage import save_json, save_markdown
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,11 +39,31 @@ def main() -> None:
     print("LAYER 1.5: MARKDOWN -> MEANINGFUL CHUNKS")
     print("=" * 60)
 
-    sections = split_into_sections(markdown)
+    headers = find_headers(markdown)
+    save_json(
+        {"total_headers": len(headers), "headers": headers},
+        output_dir / f"{pdf_path.stem}_headers.json",
+        "Headers",
+    )
+    print(f"Headers detected: {len(headers)}")
+
+    sections = split_into_sections(markdown, headers)
+    save_json(
+        {"total_sections": len(sections), "sections": sections},
+        output_dir / f"{pdf_path.stem}_sections.json",
+        "Sections",
+    )
     print(f"Sections detected: {len(sections)}")
 
     chunks = create_chunks(sections)
+    save_json(
+        {"total_chunks": len(chunks), "chunks": chunks},
+        output_dir / f"{pdf_path.stem}_chunks.json",
+        "Chunks",
+    )
     print(f"Chunks created: {len(chunks)}")
+
+    chunks = append_previous_text(chunks)
 
     if chunks:
         sizes = [chunk["char_count"] for chunk in chunks]
@@ -51,7 +71,11 @@ def main() -> None:
         print(f"Largest chunk:  {max(sizes):,} chars")
         print(f"Average chunk:  {sum(sizes) / len(sizes):,.0f} chars")
 
-    save_chunks(chunks, output_dir / f"{pdf_path.stem}_chunks.json")
+    save_json(
+        {"total_chunks": len(chunks), "chunks": chunks},
+        output_dir / f"{pdf_path.stem}_final.json",
+        "Final chunks",
+    )
 
     print()
     print("=" * 60)

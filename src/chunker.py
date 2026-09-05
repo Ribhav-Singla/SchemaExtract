@@ -65,7 +65,7 @@ def build_chunk(text: str, section: dict) -> dict:
 
 
 def create_chunks(sections: list[dict]) -> list[dict]:
-    """Convert sections into meaningful, overlapping chunks."""
+    """Convert sections into meaningful chunks without embedded overlap."""
     chunks = []
 
     for section in sections:
@@ -83,9 +83,8 @@ def create_chunks(sections: list[dict]) -> list[dict]:
             if current_blocks and current_length + block_length > TARGET_CHUNK_CHARS:
                 chunk_text = "\n\n".join(current_blocks)
                 chunks.append(build_chunk(chunk_text, section))
-                overlap_text = get_overlap(chunk_text, OVERLAP_CHARS)
-                current_blocks = [overlap_text]
-                current_length = len(overlap_text)
+                current_blocks = []
+                current_length = 0
 
             current_blocks.append(block)
             current_length += block_length + 2
@@ -97,4 +96,13 @@ def create_chunks(sections: list[dict]) -> list[dict]:
         chunk["chunk_id"] = f"chunk_{index + 1:04d}"
         chunk["chunk_index"] = index
 
+    return chunks
+
+
+def append_previous_text(chunks: list[dict]) -> list[dict]:
+    """Add prior-chunk overlap as a separate field without changing chunk text."""
+    previous_text = ""
+    for chunk in chunks:
+        chunk["prev_text"] = previous_text
+        previous_text = get_overlap(chunk["text"], OVERLAP_CHARS)
     return chunks

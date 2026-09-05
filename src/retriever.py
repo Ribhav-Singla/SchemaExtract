@@ -182,19 +182,13 @@ class ChunkRetriever:
         ranked = []
         for index, chunk in enumerate(chunks):
             result = dict(chunk)
-            criteria_scores = {
+            result["scores"] = {
                 "semantic": round(float(semantic[index]), 4),
                 "lexical": round(float(lexical[index]), 4),
                 "entity": round(float(entity[index]), 4),
                 "structural": round(float(structural[index]), 4),
+                "final": round(float(final[index]), 4),
             }
-            total_score = round(float(final[index]), 4)
-            result["scores"] = {
-                **criteria_scores,
-                "final": total_score,
-            }
-            result["evaluation_scores"] = criteria_scores
-            result["total_score"] = total_score
             result["threshold"] = threshold
             result["passes_threshold"] = bool(final[index] >= threshold)
             ranked.append(result)

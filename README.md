@@ -21,6 +21,6 @@ Use `--threshold` to control the pass flag (default: `0.5`):
 python main.py path/to/document.pdf --schema examples/example1.json --threshold 0.7
 ```
 
-Each ranked chunk includes separate semantic, lexical, entity, and structural
-scores, a `total_score`, and a `passes_threshold` boolean. Results are saved as
-`<document>_top_chunks.json` in the output directory.
+Each ranked chunk includes one `scores` object containing semantic, lexical,
+entity, structural, and final scores, plus a `passes_threshold` boolean.
+Results are saved as `<document>_top_chunks.json` in the output directory.

@@ -1,5 +1,5 @@
 import pdf from "pdf-parse";
-import { pipeline } from "@huggingface/transformers";
+import { env, pipeline } from "@huggingface/transformers";
 import { createServerLogger, type ServerLogger } from "@/lib/logger";
 
 type Section = {
@@ -53,6 +53,7 @@ const synonyms: Record<string, string[]> = {
 };
 
 const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+env.backends.onnx.executionProviders = ["wasm"];
 type EmbeddingOutput = { dims: number[]; data: ArrayLike<number> };
 type FeatureExtractor = (
   input: string | string[],
@@ -63,12 +64,16 @@ const startupLogger = createServerLogger("server-startup");
 async function loadFeatureExtractor(): Promise<FeatureExtractor> {
   startupLogger.stage("embedding_model_loading_started", {
     model: EMBEDDING_MODEL,
+    backend: "wasm",
   });
   const extractor = await (pipeline(
     "feature-extraction",
     EMBEDDING_MODEL,
   ) as unknown as Promise<FeatureExtractor>);
-  startupLogger.stage("embedding_model_loaded", { model: EMBEDDING_MODEL });
+  startupLogger.stage("embedding_model_loaded", {
+    model: EMBEDDING_MODEL,
+    backend: "wasm",
+  });
   return extractor;
 }
 

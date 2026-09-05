@@ -16,6 +16,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("pdf", help="Input PDF file")
     parser.add_argument("--output-dir", default="output", help="Output directory")
+    parser.add_argument("--schema", help="JSON schema used to rank relevant chunks")
+    parser.add_argument("--top-k", type=int, default=5, help="Number of ranked chunks to save")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Minimum total score required to pass a chunk",
+    )
     return parser.parse_args()
 
 
@@ -76,6 +84,31 @@ def main() -> None:
         output_dir / f"{pdf_path.stem}_final.json",
         "Final chunks",
     )
+
+    if args.schema:
+        from src.retriever import ChunkRetriever
+
+        schema_path = Path(args.schema)
+        if not schema_path.is_file():
+            raise FileNotFoundError(f"Schema not found: {schema_path}")
+        import json
+
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        ranked_chunks = ChunkRetriever().retrieve(
+            chunks,
+            schema,
+            args.top_k,
+            args.threshold,
+        )
+        save_json(
+            {
+                "top_k": len(ranked_chunks),
+                "threshold": args.threshold,
+                "chunks": ranked_chunks,
+            },
+            output_dir / f"{pdf_path.stem}_top_chunks.json",
+            "Ranked chunks",
+        )
 
     print()
     print("=" * 60)

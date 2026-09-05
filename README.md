@@ -1,26 +1,22 @@
 # SchemaExtract
 
-## Schema-aware chunk scoring
+SchemaExtract is also available as an interactive Next.js app. Upload a PDF,
+paste a JSON schema, and inspect the ranked `top_chunks` response in the
+browser.
 
-Run the existing PDF-to-chunks pipeline without ranking:
-
-```bash
-python main.py path/to/document.pdf
-```
-
-Rank chunks against a JSON schema using semantic, lexical, entity, and
-structural scores:
+### Run the web app
 
 ```bash
-python main.py path/to/document.pdf --schema examples/example1.json --top-k 5
+npm install
+npm run dev
 ```
 
-Use `--threshold` to control the pass flag (default: `0.5`):
+Open `http://localhost:3000`, choose a PDF, edit the schema if needed, and
+select **Analyze document**. The app extracts text on the server, creates
+meaningful sections and chunks, then displays ranked results with their
+semantic, lexical, entity, structural, and final scores.
 
-```bash
-python main.py path/to/document.pdf --schema examples/example1.json --threshold 0.7
-```
+The `examples/` and `output/` directories contain reference schemas and sample
+pipeline results.
 
-Each ranked chunk includes one `scores` object containing semantic, lexical,
-entity, structural, and final scores, plus a `passes_threshold` boolean.
-Results are saved as `<document>_top_chunks.json` in the output directory.
+---

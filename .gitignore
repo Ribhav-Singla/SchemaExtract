@@ -1,3 +1,7 @@
+node_modules/
+.next/
+tsconfig.tsbuildinfo
+
 # Byte-compiled / optimized Python files
 __pycache__/
 *.py[cod]

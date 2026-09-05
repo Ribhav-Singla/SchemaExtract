@@ -10,7 +10,7 @@ The web application provides the user interface and request workflow. It collect
 
 ### `cf-service`
 
-The Cloud Foundry service contains the backend extraction logic. It receives requests from the web application, connects to the configured source, reads its metadata, and returns the extracted schema.
+The Cloudflare Worker contains the backend extraction logic. It receives requests from the web application, connects to the configured source, reads its metadata, and returns the extracted schema.
 
 ## Request flow
 
@@ -30,9 +30,9 @@ User → web → cf-service → source database
 
 Run the web application and `cf-service` from their respective project directories using the commands documented by each project. Configure the web application with the service base URL, and configure `cf-service` with the source connection settings required by the extraction request.
 
-## Cloud Foundry deployment
+## Cloudflare deployment
 
-Deploy `cf-service` to Cloud Foundry and provide its runtime configuration through environment variables or service bindings. Configure the web application to use the deployed service URL. Do not commit credentials, tokens, or connection strings to the repository.
+From the `cf-service` directory, run `npx wrangler deploy` to deploy the Worker to Cloudflare. Configure the web application to use the deployed Worker URL. Keep credentials, tokens, and connection strings out of the repository.
 
 ## Operational guidance
 

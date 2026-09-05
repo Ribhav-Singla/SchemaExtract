@@ -71,12 +71,16 @@ const startupLogger = createServerLogger("server-startup");
 async function loadFeatureExtractor(): Promise<FeatureExtractor> {
   startupLogger.stage("embedding_model_loading_started", {
     model: EMBEDDING_MODEL,
+    backend: "onnxruntime-node",
   });
   const extractor = await (pipeline(
     "feature-extraction",
     EMBEDDING_MODEL,
   ) as unknown as Promise<FeatureExtractor>);
-  startupLogger.stage("embedding_model_loaded", { model: EMBEDDING_MODEL });
+  startupLogger.stage("embedding_model_loaded", {
+    model: EMBEDDING_MODEL,
+    backend: "onnxruntime-node",
+  });
   return extractor;
 }
 

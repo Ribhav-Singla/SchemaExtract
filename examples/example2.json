@@ -1,0 +1,39 @@
+{
+  "reward_function": {
+    "components": {
+      "progress_reward": {
+        "formula": ""
+      },
+      "living_penalty": {
+        "value": "",
+        "unit": ""
+      },
+      "collision_penalty": [
+        {
+          "condition": "",
+          "zone": "",
+          "penalty": ""
+        },
+        {
+          "condition": "",
+          "zone": "",
+          "penalty": ""
+        },
+        {
+          "condition": "",
+          "zone": "",
+          "penalty": ""
+        }
+      ],
+      "boundary_penalty": {
+        "condition": "",
+        "penalty": ""
+      }
+    },
+    "terminal_rewards": {
+      "goal_achievement": "",
+      "collision": "",
+      "out_of_bounds": ""
+    }
+  }
+}

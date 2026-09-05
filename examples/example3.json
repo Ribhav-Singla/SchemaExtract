@@ -1,0 +1,57 @@
+{
+  "decision_system": {
+    "type": "",
+    "rules": [
+      {
+        "id": "",
+        "name": "",
+        "priority": "",
+        "condition": {
+          "goal_ray_lidar": "",
+          "neighbor_rays": "",
+          "minimum_obstacle_distance": ""
+        },
+        "safety_margin": {
+          "neighbor_ray_offset": [
+            "",
+            ""
+          ],
+          "corridor_angle_degrees": ""
+        },
+        "action": {
+          "description": "",
+          "velocity_scaling_factor": "",
+          "action_bounds": [
+            "",
+            ""
+          ]
+        }
+      },
+      {
+        "id": "",
+        "name": "",
+        "priority": "",
+        "condition": {
+          "boundary_distance": ""
+        },
+        "action": {
+          "description": "",
+          "velocity_reduction_factor": "",
+          "minimum_speed": ""
+        }
+      },
+      {
+        "id": "",
+        "name": "",
+        "priority": "",
+        "condition": "",
+        "action": ""
+      }
+    ],
+    "evaluation_order": [
+      "",
+      "",
+      ""
+    ]
+  }
+}

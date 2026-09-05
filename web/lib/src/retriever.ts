@@ -1,7 +1,15 @@
-import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import os from "node:os";
+import path from "node:path";
+
+import { env, pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
 import natural from "natural";
 
 import type { Chunk } from "./types";
+
+// Serverless platforms (e.g. Vercel) ship a read-only deployment bundle, so
+// the model cache can't live inside node_modules. /tmp is the only writable
+// directory available at runtime, so redirect the cache there everywhere.
+env.cacheDir = path.join(os.tmpdir(), "transformers-cache");
 
 export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 

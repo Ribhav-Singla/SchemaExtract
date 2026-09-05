@@ -2,7 +2,11 @@
 import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "url";
-import { PDFParse } from "pdf-parse";
+import {
+    DOMMatrix,
+    ImageData,
+    Path2D,
+} from "@napi-rs/canvas";
 
 const PDF_WORKER_PATH = path.join(
     process.cwd(),
@@ -14,8 +18,6 @@ const PDF_WORKER_PATH = path.join(
     "pdf.worker.mjs"
 );
 
-PDFParse.setWorker(pathToFileURL(PDF_WORKER_PATH).href);
-
 export async function pdfToMarkdown(
     pdfPath: string
 ): Promise<string> {
@@ -23,6 +25,15 @@ export async function pdfToMarkdown(
     console.log("LAYER 1: PDF -> MARKDOWN");
     console.log("=".repeat(60));
     console.log(`Input PDF: ${pdfPath}`);
+
+    Object.assign(globalThis, {
+        DOMMatrix,
+        ImageData,
+        Path2D,
+    });
+
+    const { PDFParse } = await import("pdf-parse");
+    PDFParse.setWorker(pathToFileURL(PDF_WORKER_PATH).href);
 
     const pdfData = await fs.readFile(pdfPath);
     const parser = new PDFParse({ data: pdfData });

@@ -75,7 +75,7 @@ export async function runPipeline(
 
 
     const outputPath =
-        path.resolve(outputDir);
+        path.resolve(/* turbopackIgnore: true */ outputDir);
 
     await fs.mkdir(outputPath, {
         recursive: true,

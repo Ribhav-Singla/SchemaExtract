@@ -200,21 +200,58 @@ body {
   animation: sparkle-pulse 2.6s ease-in-out infinite;
 }
 
-@keyframes progress-indeterminate {
+@keyframes pulse-ring {
   0% {
-    transform: translateX(-100%) scaleX(0.4);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
   }
-  50% {
-    transform: translateX(20%) scaleX(0.6);
+  70% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent);
   }
   100% {
-    transform: translateX(100%) scaleX(0.4);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
   }
 }
 
-.animate-progress-indeterminate {
-  animation: progress-indeterminate 1.3s ease-in-out infinite;
+.animate-pulse-ring {
+  animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) rotate(-8deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.18) rotate(2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.animate-dot-bounce {
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+
 
 /* JSON syntax token colors. Default (unscoped) = dark code editor palette. */
 .text-editor-key {
@@ -273,8 +310,10 @@ body {
   .animate-float-slow,
   .animate-dash-flow,
   .animate-sparkle,
-  .animate-progress-indeterminate,
   .animate-field-pop,
+  .animate-pulse-ring,
+  .animate-pop-in,
+  .animate-dot-bounce,
   .animate-spin {
     animation: none !important;
   }

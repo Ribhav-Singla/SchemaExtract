@@ -1,10 +1,28 @@
 {
-  "research_area": "",
-  "application": "",
-  "base_algorithm": "",
-  "environment": "",
-  "models_evaluated": [],
-  "perception": [],
-  "experimental_conditions": [],
-  "main_finding": ""
+  "invoice_number": "string",
+  "application": "string",
+  "store_name": "string",
+  "location": "string",
+  "order_items": [
+    {
+      "order_id": "string",
+      "order_date": "string",
+      "item": [
+        {
+          "name": "string",
+          "quantity": "number",
+          "price": "number"
+        }
+      ]
+    }
+  ],
+  "amount": {
+    "gst": [
+      {
+        "tax_rate": "double",
+        "value": "number"
+      }
+    ]
+  },
+  "total_amount": "number"
 }

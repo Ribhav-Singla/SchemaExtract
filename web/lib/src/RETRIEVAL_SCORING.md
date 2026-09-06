@@ -24,17 +24,29 @@ chunks ──┬─► semantic (embeddings · query)◄────┘     │
 
 ## 1. Schema → query
 
-- `flattenSchema` walks the (possibly nested) JSON schema into dotted field
-  paths (`author.name`, `total.amount`).
+- `flattenSchema` walks the (possibly nested) JSON schema into a list of
+  `SchemaField { path, type? }` — dotted field paths (`author.name`,
+  `total.amount`) plus, when the schema's leaf values are type names rather
+  than blank placeholders (`"amount": "number"` instead of `"amount": ""`),
+  the declared type (lowercased). Blank placeholders (`""`, `[]`) still work
+  and just leave `type` undefined, so older schemas keep behaving exactly as
+  before.
 - `normalizeFieldName` strips the path down to the leaf, un-camelCases and
   un-snake_cases it (`totalAmount` → `total amount`).
 - `expandField` adds domain synonyms from `FIELD_SYNONYMS` (`amount` also
   pulls in `total`, `cost`, `price`, `fee`, …). The union of every field's
   expansion, joined into one string, is the query embedded for semantic
   search and the term list used for TF-IDF.
-- `inferEntityTypes` maps each field name to the `EntityType`s it's likely to
-  resolve to (`author` → `PERSON`, `total` → `MONEY`, `date` → `DATE`, …).
-  This drives both entity scoring and the adaptive weight profile below.
+- `inferEntityTypes(path, type?)` maps each field to the `EntityType`s it's
+  likely to resolve to, primarily from the field *name* (`author` → `PERSON`,
+  `total` → `MONEY`, `date` → `DATE`, …). When the name gives no signal at
+  all, it falls back to the schema's *declared type*: a field typed
+  `"number"`/`"double"`/`"integer"`/… (and with no more specific name match)
+  is expected to resolve to `NUMBER`. This is what makes a field like
+  `"quantity": "number"` or `"tax_rate": "double"` — whose name doesn't hint
+  at money or a percentage — still get real entity-scoring credit instead of
+  contributing no expected type at all. This drives both entity scoring and
+  the adaptive weight profile below.
 
 ## 2. Four signals
 

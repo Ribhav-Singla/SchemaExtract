@@ -48,14 +48,14 @@ interface ExtractionResponse {
 }
 
 const EXAMPLE_SCHEMA = `{
-  "research_area": "",
-  "application": "",
-  "base_algorithm": "",
-  "environment": "",
-  "models_evaluated": [],
-  "perception": [],
-  "experimental_conditions": [],
-  "main_finding": ""
+  "research_area": "string",
+  "application": "string",
+  "base_algorithm": "string",
+  "environment": "string",
+  "models_evaluated": ["string"],
+  "perception": ["string"],
+  "experimental_conditions": ["string"],
+  "main_finding": "string"
 }
 `;
 

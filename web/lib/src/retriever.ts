@@ -196,8 +196,29 @@ export const ENTITY_PATTERNS: Record<Exclude<EntityType, "PERSON">, RegExp> = {
   ORG: /\b(?:University|Institute|College|Department|Corporation|Corp\.?|Company|Ltd\.?|Limited|Inc\.?)\b/gi,
 };
 
-export function flattenSchema(schema: unknown, prefix = ""): string[] {
-  const fields: string[] = [];
+export interface SchemaField {
+  /** Dotted field path, e.g. "order_items.item.price". */
+  path: string;
+  /**
+   * Declared leaf type from the schema (e.g. "string", "number", "double"),
+   * lowercased. Undefined for container fields (objects/arrays) and for
+   * schemas that still use untyped placeholders like "" or [].
+   */
+  type?: string;
+}
+
+function leafType(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  return normalized === "" ? undefined : normalized;
+}
+
+export function flattenSchema(schema: unknown, prefix = ""): SchemaField[] {
+  const fields: SchemaField[] = [];
 
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     return fields;
@@ -209,7 +230,7 @@ export function flattenSchema(schema: unknown, prefix = ""): string[] {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       fields.push(...flattenSchema(value, fieldName));
     } else if (Array.isArray(value)) {
-      fields.push(fieldName);
+      fields.push({ path: fieldName });
 
       if (
         value.length > 0 &&
@@ -220,7 +241,7 @@ export function flattenSchema(schema: unknown, prefix = ""): string[] {
         fields.push(...flattenSchema(value[0], fieldName));
       }
     } else {
-      fields.push(fieldName);
+      fields.push({ path: fieldName, type: leafType(value) });
     }
   }
 
@@ -265,7 +286,24 @@ export function expandField(field: string): string[] {
   return Array.from(terms).sort();
 }
 
-export function inferEntityTypes(field: string): Set<EntityType> {
+// Schema type-name aliases that indicate "some number", used only as a
+// fallback when the field's own name gives no more specific signal (a
+// MONEY/PERCENT match from the name always wins over this).
+const NUMERIC_TYPE_NAMES = new Set([
+  "number",
+  "num",
+  "integer",
+  "int",
+  "float",
+  "double",
+  "decimal",
+  "long",
+]);
+
+export function inferEntityTypes(
+  field: string,
+  declaredType?: string,
+): Set<EntityType> {
   const normalized = normalizeFieldName(field);
 
   const types = new Set<EntityType>();
@@ -330,6 +368,18 @@ export function inferEntityTypes(field: string): Set<EntityType> {
     ["phone", "mobile", "telephone"].some((word) => normalized.includes(word))
   ) {
     types.add("PHONE");
+  }
+
+  // The field name gave no specific signal, but the schema itself declares
+  // this a numeric field (e.g. "quantity": "number", "tax_rate": "double")
+  // — fall back to expecting a plain number, so entity scoring still rewards
+  // chunks that contain an actual numeric value for it.
+  if (
+    types.size === 0 &&
+    declaredType &&
+    NUMERIC_TYPE_NAMES.has(declaredType)
+  ) {
+    types.add("NUMBER");
   }
 
   return types;
@@ -447,11 +497,14 @@ export function entityScores(
   return normalizeScores(scores);
 }
 
-export function structuralScores(chunks: Chunk[], fields: string[]): number[] {
+export function structuralScores(
+  chunks: Chunk[],
+  fields: SchemaField[],
+): number[] {
   const fieldWords = Array.from(
     new Set(
       fields
-        .flatMap((field) => expandField(field))
+        .flatMap((field) => expandField(field.path))
         .join(" ")
         .split(/\s+/)
         .filter((word) => word.length > 3),
@@ -468,7 +521,7 @@ export function structuralScores(chunks: Chunk[], fields: string[]): number[] {
     "organization",
   ];
 
-  const fieldText = fields.map(normalizeFieldName).join(" ");
+  const fieldText = fields.map((field) => normalizeFieldName(field.path)).join(" ");
 
   const looksLikeMetadataQuery = metadataFields.some((field) =>
     fieldText.includes(field),
@@ -536,7 +589,7 @@ export function structuralScores(chunks: Chunk[], fields: string[]): number[] {
 // (free-text summaries, descriptions) have nothing for regex matching to
 // grab onto, so semantic + lexical similarity carry the weight instead.
 export function computeAdaptiveWeights(
-  fields: string[],
+  fields: SchemaField[],
   expectedTypes: Set<EntityType>,
 ): ScoreWeights {
   if (fields.length === 0) {
@@ -721,13 +774,13 @@ export class ChunkRetriever {
     // 2. Expand schema fields
 
     const expandedTerms = Array.from(
-      new Set(fields.flatMap((field) => expandField(field))),
+      new Set(fields.flatMap((field) => expandField(field.path))),
     ).sort();
 
     const expectedTypes = new Set<EntityType>();
 
     for (const field of fields) {
-      for (const entityType of inferEntityTypes(field)) {
+      for (const entityType of inferEntityTypes(field.path, field.type)) {
         expectedTypes.add(entityType);
       }
     }

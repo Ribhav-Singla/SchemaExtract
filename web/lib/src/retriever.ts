@@ -105,14 +105,22 @@ export type EntityType =
   | "PERCENT"
   | "NUMBER"
   | "ORG"
-  | "PERSON";
+  | "PERSON"
+  | "ID"
+  | "URL";
 
+// Entity types that typically identify a document's own header/metadata
+// (who/what/when it's from or about) across most document kinds — a byline,
+// a vendor block, an invoice/order/case number, a contact address — as
+// opposed to types like MONEY/PERCENT/NUMBER that are just as likely to be
+// ordinary content values scattered through the body.
 const METADATA_ENTITY_TYPES = new Set<EntityType>([
   "PERSON",
   "ORG",
   "EMAIL",
   "PHONE",
   "DATE",
+  "ID",
 ]);
 
 export interface RetrievalScores {
@@ -130,10 +138,20 @@ export interface RetrievedChunk extends Chunk {
   rank: number;
 }
 
+// Domain-general vocabulary: covers document metadata (name/org/date/title),
+// commerce documents (invoices/receipts/orders), and correspondence/contracts
+// (parties, references, contact info) without assuming any one document type.
 export const FIELD_SYNONYMS: Record<string, string[]> = {
-  name: ["name", "full name", "person name"],
+  name: ["name", "full name", "person name", "contact name"],
 
-  author: ["author", "authors", "written by"],
+  author: [
+    "author",
+    "authors",
+    "written by",
+    "prepared by",
+    "signed by",
+    "submitted by",
+  ],
 
   organization: [
     "organization",
@@ -143,6 +161,10 @@ export const FIELD_SYNONYMS: Record<string, string[]> = {
     "university",
     "institute",
     "department",
+    "business",
+    "firm",
+    "corporation",
+    "employer",
   ],
 
   affiliation: [
@@ -153,30 +175,92 @@ export const FIELD_SYNONYMS: Record<string, string[]> = {
     "institute",
   ],
 
-  title: ["title", "document title", "paper title", "report title", "heading"],
+  party: [
+    "party",
+    "vendor",
+    "merchant",
+    "supplier",
+    "seller",
+    "buyer",
+    "customer",
+    "client",
+    "payer",
+    "payee",
+    "store",
+  ],
+
+  title: [
+    "title",
+    "document title",
+    "paper title",
+    "report title",
+    "heading",
+    "subject",
+  ],
 
   keyword: ["keyword", "keywords", "key words", "key terms", "index terms"],
 
-  date: ["date", "day", "month", "year", "published", "created", "issued"],
+  date: [
+    "date",
+    "day",
+    "month",
+    "year",
+    "published",
+    "created",
+    "issued",
+    "due",
+    "expiry",
+    "expiration",
+    "effective",
+  ],
 
   amount: [
     "amount",
     "total",
+    "subtotal",
+    "balance",
     "cost",
     "price",
     "value",
     "fee",
     "payment",
     "payable",
+    "charge",
   ],
 
-  address: ["address", "location", "place", "residence"],
+  identifier: [
+    "identifier",
+    "id",
+    "number",
+    "reference",
+    "reference number",
+    "code",
+  ],
+
+  item: ["item", "product", "description", "goods", "service", "line item"],
+
+  quantity: ["quantity", "count", "units"],
+
+  status: ["status", "state"],
+
+  address: [
+    "address",
+    "location",
+    "place",
+    "residence",
+    "street",
+    "city",
+    "postal code",
+    "zip code",
+  ],
 
   email: ["email", "e-mail", "email address"],
 
-  phone: ["phone", "telephone", "mobile", "contact number"],
+  phone: ["phone", "telephone", "mobile", "contact number", "fax", "cell"],
 
   percentage: ["percentage", "percent", "rate", "ratio"],
+
+  website: ["url", "website", "link", "site"],
 };
 
 export const ENTITY_PATTERNS: Record<Exclude<EntityType, "PERSON">, RegExp> = {
@@ -193,7 +277,17 @@ export const ENTITY_PATTERNS: Record<Exclude<EntityType, "PERSON">, RegExp> = {
 
   NUMBER: /\b\d+(?:\.\d+)?\b/g,
 
-  ORG: /\b(?:University|Institute|College|Department|Corporation|Corp\.?|Company|Ltd\.?|Limited|Inc\.?)\b/gi,
+  // Business-entity suffixes (Ltd/Inc/LLC/…) alongside the original
+  // academic-institution words, so this fires for a company as readily as
+  // a university.
+  ORG: /\b(?:University|Institute|College|Department|Corporation|Corp\.?|Company|Ltd\.?|Limited|Inc\.?|LLC|LLP|PLC|GmbH|Co\.|Group|Holdings|Partners|Enterprises|Associates)\b/gi,
+
+  // A loose "reference code" shape: an invoice/order/ticket/case number —
+  // a run of letters+digits with an optional separator (INV-2024-0091,
+  // PO#12345, ORD_88213), or a bare "#12345" style reference.
+  ID: /\b[A-Za-z]{2,6}[-_#/]\w{2,}(?:[-_/]\w+)*\b|#\d{3,}\b/g,
+
+  URL: /\bhttps?:\/\/\S+\b|\bwww\.\S+\b/gi,
 };
 
 export interface SchemaField {
@@ -300,6 +394,58 @@ const NUMERIC_TYPE_NAMES = new Set([
   "long",
 ]);
 
+// A bare "name" is one of the most overloaded words in any schema — a
+// person's name, but just as often a store/item/product/company/file/model
+// name. normalizeFieldName only keeps the last dotted path segment (so
+// "order_items.item.name" normalizes to just "name", same as a top-level
+// "name" field), so disambiguating has to look at both the compound leaf
+// text ("store_name" -> "store name") and, for nested paths, the parent
+// segment that got stripped away.
+const NON_PERSON_NAME_CONTEXTS = [
+  "store",
+  "item",
+  "product",
+  "organization",
+  "organisation",
+  "company",
+  "business",
+  "vendor",
+  "merchant",
+  "supplier",
+  "file",
+  "document",
+  "category",
+  "brand",
+  "project",
+  "model",
+  "field",
+  "column",
+  "table",
+  "application",
+  "algorithm",
+  "environment",
+];
+
+function hasNonPersonNameContext(field: string, normalized: string): boolean {
+  if (
+    NON_PERSON_NAME_CONTEXTS.some((word) => normalized.includes(`${word} name`))
+  ) {
+    return true;
+  }
+
+  const segments = field.split(".");
+
+  if (segments.length >= 2) {
+    const parent = normalizeFieldName(segments[segments.length - 2]);
+
+    if (NON_PERSON_NAME_CONTEXTS.some((word) => parent.includes(word))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function inferEntityTypes(
   field: string,
   declaredType?: string,
@@ -308,11 +454,14 @@ export function inferEntityTypes(
 
   const types = new Set<EntityType>();
 
-  if (
-    ["name", "author", "person", "researcher"].some((word) =>
-      normalized.includes(word),
-    )
-  ) {
+  const mentionsPersonWord = ["author", "person", "researcher"].some((word) =>
+    normalized.includes(word),
+  );
+
+  const mentionsName =
+    normalized.includes("name") && !hasNonPersonNameContext(field, normalized);
+
+  if (mentionsPersonWord || mentionsName) {
     types.add("PERSON");
   }
 
@@ -326,6 +475,14 @@ export function inferEntityTypes(
       "institute",
       "department",
       "affiliation",
+      "vendor",
+      "merchant",
+      "supplier",
+      "employer",
+      "business",
+      "firm",
+      "corporation",
+      "store",
     ].some((word) => normalized.includes(word))
   ) {
     types.add("ORG");
@@ -368,6 +525,33 @@ export function inferEntityTypes(
     ["phone", "mobile", "telephone"].some((word) => normalized.includes(word))
   ) {
     types.add("PHONE");
+  }
+
+  // Deliberately excludes a bare "number" — that alone is too generic
+  // (it would also fire for "phone number", "page number", …) and dilute
+  // the expected-type set for fields that are really a different type.
+  if (
+    [
+      "id",
+      "identifier",
+      "reference",
+      "code",
+      "invoice",
+      "order",
+      "ticket",
+      "case",
+      "tracking",
+      "serial",
+      "account",
+    ].some((word) => normalized.includes(word))
+  ) {
+    types.add("ID");
+  }
+
+  if (
+    ["url", "website", "link", "site"].some((word) => normalized.includes(word))
+  ) {
+    types.add("URL");
   }
 
   // The field name gave no specific signal, but the schema itself declares
@@ -497,6 +681,15 @@ export function entityScores(
   return normalizeScores(scores);
 }
 
+const LOW_VALUE_SECTION_KEYWORDS = [
+  "reference",
+  "bibliography",
+  "footnote",
+  "disclaimer",
+  "appendix",
+  "boilerplate",
+];
+
 export function structuralScores(
   chunks: Chunk[],
   fields: SchemaField[],
@@ -511,6 +704,15 @@ export function structuralScores(
     ),
   );
 
+  // Two independent signals for "this schema is asking about the document's
+  // own header/metadata, not its body content" — kept as an OR so neither
+  // has to cover every document kind on its own:
+  //  1. a fixed vocabulary list, tuned for document/report metadata
+  //     (title, authors, keywords, ...);
+  //  2. whether any field resolves to a "metadata-shaped" entity type
+  //     (PERSON/ORG/EMAIL/PHONE/DATE/ID) via the same inference used for
+  //     entity scoring — this is what generalizes the bonus to invoices,
+  //     contracts, resumes, etc. without hardcoding their vocabulary too.
   const metadataFields = [
     "title",
     "author",
@@ -519,13 +721,22 @@ export function structuralScores(
     "keyword",
     "keywords",
     "organization",
+    "subject",
   ];
 
   const fieldText = fields.map((field) => normalizeFieldName(field.path)).join(" ");
 
-  const looksLikeMetadataQuery = metadataFields.some((field) =>
+  const hasMetadataKeyword = metadataFields.some((field) =>
     fieldText.includes(field),
   );
+
+  const hasMetadataEntitySignal = fields.some((field) =>
+    Array.from(inferEntityTypes(field.path, field.type)).some((type) =>
+      METADATA_ENTITY_TYPES.has(type),
+    ),
+  );
+
+  const looksLikeMetadataQuery = hasMetadataKeyword || hasMetadataEntitySignal;
 
   const scores: number[] = [];
 
@@ -572,7 +783,13 @@ export function structuralScores(
       score += 2;
     }
 
-    if (section.includes("reference") || section.includes("bibliography")) {
+    // Sections that are dense with names/dates/numbers but almost never
+    // hold the field's actual value, across document kinds — a paper's
+    // citation list, a contract's boilerplate/disclaimer, an appendix.
+    // Deliberately narrow: something like "terms and conditions" is left
+    // out, since for a contract schema that section can be the actual
+    // substance being asked for.
+    if (LOW_VALUE_SECTION_KEYWORDS.some((word) => section.includes(word))) {
       score -= 2;
     }
 

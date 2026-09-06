@@ -5,6 +5,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 
 import { runPipeline } from "../../../lib/main";
+import { getSchemaExtractDatabase } from "../../../lib/mongodb";
 
 export const runtime = "nodejs";
 
@@ -76,7 +77,46 @@ export async function POST(request: NextRequest) {
 			schema,
 		});
 
-		return NextResponse.json(result);
+		const extractionResponse = await fetch(
+			process.env.EXTRACTION_WORKER_URL ??
+				"https://extraction-ai.ticketfusion.workers.dev",
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					user_schema: schema,
+					user_content: result.ranked_chunks,
+				}),
+			}
+		);
+
+		const extractionData: unknown = await extractionResponse.json();
+
+		if (!extractionResponse.ok) {
+			const workerError =
+				extractionData && typeof extractionData === "object" && "error" in extractionData
+					? String(extractionData.error)
+					: "Extraction failed";
+
+			throw new Error(workerError);
+		}
+
+		const database = await getSchemaExtractDatabase();
+		await database.collection("extractions").insertOne({
+			created_on: new Date(),
+			pdf_name: pdf.name,
+			pdf_size: pdf.size,
+			user_schema: schema,
+			top_k_chunks: result.ranked_chunks,
+			response: extractionData,
+		});
+
+		return NextResponse.json({
+			...result,
+			extraction_response: extractionData,
+		});
 	} catch (error) {
 		console.error("Pipeline analysis failed", error);
 

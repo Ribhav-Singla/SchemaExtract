@@ -215,30 +215,7 @@ export default function Home() {
       }
 
       setResult(body);
-
-      // Send chunks to extraction API via backend proxy
-      const chunksToSend =
-        activeTab === "all" ? body.chunks : body.ranked_chunks;
-      const extractionPayload = {
-        user_schema: JSON.parse(schema),
-        user_content: chunksToSend,
-      };
-
-      const extractionResponse = await fetch("/api/extract", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(extractionPayload),
-      });
-
-      const extractionData = await extractionResponse.json();
-
-      if (!extractionResponse.ok) {
-        throw new Error(extractionData.error ?? "Extraction failed");
-      }
-
-      setExtractionResult(extractionData);
+      setExtractionResult(body.extraction_response ?? null);
     } catch (requestError) {
       setError(
         requestError instanceof Error

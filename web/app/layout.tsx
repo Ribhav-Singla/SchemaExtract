@@ -14,16 +14,33 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Schema Extract",
-  description: "Turn a research paper into structured, evidence-backed JSON.",
+  description: "Turn any PDF into structured, evidence-backed JSON.",
 };
+
+const themeInitScript = `
+(function () {
+  try {
+    var stored = localStorage.getItem("theme");
+    var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = stored ? stored === "dark" : prefersDark;
+    document.documentElement.classList.toggle("dark", isDark);
+  } catch (e) {}
+})();
+`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="min-h-full flex flex-col bg-bg text-fg" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }

@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   Download,
+  Eye,
   FileText,
   Loader2,
   Play,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import FeedbackWidget from "./components/FeedbackWidget";
 import HeroIllustration from "./components/HeroIllustration";
 import JsonViewer from "./components/JsonViewer";
 import SchemaEditor from "./components/SchemaEditor";
@@ -45,6 +47,49 @@ interface ExtractionResponse {
   created?: number;
   id?: string;
   [key: string]: unknown;
+}
+
+// Leaf values in the schema must name a data type, not an arbitrary string —
+// this is what the extraction pipeline (see `leafType` in retriever.ts)
+// expects to find at each field.
+const ALLOWED_SCHEMA_TYPES = new Set([
+  "string",
+  "number",
+  "integer",
+  "int",
+  "float",
+  "double",
+  "decimal",
+  "long",
+  "boolean",
+  "bool",
+  "date",
+  "datetime",
+]);
+
+// Walks the parsed schema looking for a leaf value that isn't one of
+// ALLOWED_SCHEMA_TYPES. Returns the offending value, or null if every leaf
+// is a recognized type name.
+function findInvalidSchemaType(node: unknown): string | null {
+  if (typeof node === "string") {
+    return ALLOWED_SCHEMA_TYPES.has(node.trim().toLowerCase()) ? null : node;
+  }
+
+  if (Array.isArray(node)) {
+    return node.length > 0 ? findInvalidSchemaType(node[0]) : null;
+  }
+
+  if (typeof node === "object" && node !== null) {
+    for (const value of Object.values(node)) {
+      const invalid = findInvalidSchemaType(value);
+      if (invalid !== null) {
+        return invalid;
+      }
+    }
+    return null;
+  }
+
+  return String(node);
 }
 
 const EXAMPLE_SCHEMA = `{
@@ -312,19 +357,32 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Bumped on every analyse() call and used as ExtractionProgress's `key` so
+  // the pipeline animation remounts (stageIndex/elapsedMs reset to 0)
+  // instead of resuming from wherever the previous run left off.
+  const [runId, setRunId] = useState(0);
   // --- Only used by the (currently hidden) chunks view below.
   // const [activeTab, setActiveTab] = useState<"all" | "top">("all");
   // const [resultTab, setResultTab] = useState<"chunks" | "extraction">("chunks");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const schemaIsValid = useMemo(() => {
+  const schemaError = useMemo(() => {
+    let parsed: unknown;
     try {
-      JSON.parse(schema);
-      return true;
+      parsed = JSON.parse(schema);
     } catch {
-      return false;
+      return "Schema must be valid JSON.";
     }
+
+    const invalidType = findInvalidSchemaType(parsed);
+    if (invalidType !== null) {
+      return `"${invalidType}" is not a valid data type — use string, number, integer, float, double, boolean, or date.`;
+    }
+
+    return null;
   }, [schema]);
+
+  const schemaIsValid = schemaError === null;
 
   async function pickFile(file: File | null) {
     if (!file) {
@@ -371,13 +429,14 @@ export default function Home() {
     }
 
     if (!schemaIsValid) {
-      setError("Schema must be valid JSON.");
+      setError(schemaError ?? "Schema must be valid JSON.");
       return;
     }
 
     const formData = new FormData();
     formData.append("pdf", pdf);
     formData.append("schema", schema);
+    setRunId((id) => id + 1);
     setLoading(true);
 
     try {
@@ -505,9 +564,8 @@ export default function Home() {
             </h1>
             <p className="mt-5 max-w-xl text-lg text-muted">
               Papers, invoices, contracts, reports &mdash; upload any PDF,
-              describe the fields you need, and retrieve the most relevant
-              chunks &mdash; ranked by semantic, lexical, entity and
-              structural signal.
+              describe the fields you need, and get clean, structured JSON
+              back in seconds.
             </p>
           </div>
 
@@ -644,14 +702,39 @@ export default function Home() {
 
               <div className="flex items-center gap-3">
                 <span
+                  title={schemaError ?? undefined}
                   className={`flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide ${schemaIsValid ? "text-success" : "text-danger"
                     }`}
                 >
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${schemaIsValid ? "bg-success" : "bg-danger"}`}
                   />
-                  {schemaIsValid ? "Valid JSON" : "Invalid JSON"}
+                  {schemaIsValid ? "Valid schema" : "Invalid schema"}
                 </span>
+                <div className="group relative flex items-center">
+                  <button
+                    type="button"
+                    aria-label="Show allowed schema value types"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:text-accent"
+                  >
+                    <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </button>
+                  <div className="pointer-events-none absolute right-0 top-full z-30 mt-2 w-60 rounded-xl border border-border bg-surface p-3 opacity-0 shadow-[var(--shadow-card)] transition-opacity duration-150 group-hover:opacity-100">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      Allowed value types
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.from(ALLOWED_SCHEMA_TYPES).map((type) => (
+                        <span
+                          key={type}
+                          className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-fg"
+                        >
+                          {type}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setSchema(EXAMPLE_SCHEMA)}
@@ -881,7 +964,7 @@ export default function Home() {
                 result lands, instead of being swapped out for the content
                 below — the extracted data appears underneath it. */}
             <div className="mt-8">
-              <ExtractionProgress complete={result !== null} />
+              <ExtractionProgress key={runId} complete={result !== null} />
             </div>
 
             {result !== null && (extractionResult?.response ? (
@@ -929,11 +1012,13 @@ export default function Home() {
       </section>
 
       <footer className="border-t border-border px-6 py-8 sm:px-10">
-        <p className="mx-auto max-w-6xl text-xs text-muted">
-          Layered semantic retrieval &mdash; embeddings, TF&ndash;IDF, entity
-          and structural scoring, blended into a single relevance rank.
+        <p className="mx-auto max-w-6xl text-sm text-muted">
+          Built for speed and accuracy &mdash; extract exactly the fields you
+          define, from any document, every time.
         </p>
       </footer>
+
+      <FeedbackWidget />
     </main>
   );
 }

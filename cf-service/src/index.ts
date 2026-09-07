@@ -1,3 +1,5 @@
+import { MAX_PDF_SIZE } from "../../web/lib/pdf";
+
 interface Env {
 	AI: Ai;
 }
@@ -92,6 +94,21 @@ export default {
 
 			const userSchema = body.user_schema;
 			const userContent = body.user_content;
+			const pdfSize = body.pdf_size;
+
+			if (!Number.isInteger(pdfSize) || pdfSize < 0) {
+				return Response.json(
+					{ error: "pdf_size is required and must be a non-negative integer" },
+					{ status: 400 }
+				);
+			}
+
+			if (pdfSize > MAX_PDF_SIZE) {
+				return Response.json(
+					{ error: "The PDF must be 7 MB or smaller" },
+					{ status: 413 }
+				);
+			}
 
 			if (!userSchema) {
 				return Response.json(

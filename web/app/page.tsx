@@ -21,6 +21,7 @@ import HeroIllustration from "./components/HeroIllustration";
 import JsonViewer from "./components/JsonViewer";
 import SchemaEditor from "./components/SchemaEditor";
 import ThemeToggle from "./components/ThemeToggle";
+import { hasPdfSignature, MAX_PDF_SIZE } from "../lib/pdf";
 
 interface ExtractionUsage {
   prompt_tokens: number;
@@ -325,15 +326,27 @@ export default function Home() {
     }
   }, [schema]);
 
-  function pickFile(file: File | null) {
-    if (
-      file &&
-      file.type !== "application/pdf" &&
-      !file.name.toLowerCase().endsWith(".pdf")
-    ) {
-      setError("Only PDF files are supported.");
+  async function pickFile(file: File | null) {
+    if (!file) {
+      setError("");
+      setPdf(null);
       return;
     }
+
+    if (file.size > MAX_PDF_SIZE) {
+      setError("The PDF must be 7 MB or smaller.");
+      return;
+    }
+
+    if (
+      (file.type && file.type !== "application/pdf") ||
+      !file.name.toLowerCase().endsWith(".pdf") ||
+      !(await hasPdfSignature(file))
+    ) {
+      setError("Only valid PDF files are supported.");
+      return;
+    }
+
     setError("");
     setPdf(file);
   }
@@ -349,6 +362,11 @@ export default function Home() {
 
     if (!pdf) {
       setError("Choose a PDF first.");
+      return;
+    }
+
+    if (pdf.size > MAX_PDF_SIZE) {
+      setError("The PDF must be 7 MB or smaller.");
       return;
     }
 

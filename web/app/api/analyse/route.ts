@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 
 import { runPipeline } from "../../../lib/main";
 import { getSchemaExtractDatabase } from "../../../lib/mongodb";
+import { hasPdfSignature, MAX_PDF_SIZE } from "../../../lib/pdf";
 
 export const runtime = "nodejs";
 
@@ -32,9 +33,23 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
+		if (pdf.size > MAX_PDF_SIZE) {
+			return NextResponse.json(
+				{ error: "The PDF must be 7 MB or smaller" },
+				{ status: 413 }
+			);
+		}
+
 		if (path.extname(pdf.name).toLowerCase() !== ".pdf") {
 			return NextResponse.json(
 				{ error: "The uploaded file must be a PDF" },
+				{ status: 400 }
+			);
+		}
+
+		if (!(await hasPdfSignature(pdf))) {
+			return NextResponse.json(
+				{ error: "The uploaded file is not a valid PDF" },
 				{ status: 400 }
 			);
 		}
@@ -88,6 +103,7 @@ export async function POST(request: NextRequest) {
 				body: JSON.stringify({
 					user_schema: schema,
 					user_content: result.ranked_chunks,
+					pdf_size: pdf.size,
 				}),
 			}
 		);

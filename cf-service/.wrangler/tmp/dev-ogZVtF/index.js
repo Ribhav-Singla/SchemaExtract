@@ -1,6 +1,9 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
+// ../web/lib/pdf.ts
+var MAX_PDF_SIZE = 7 * 1024 * 1024;
+
 // src/index.ts
 var TYPE_ALIASES = {
   string: "string",
@@ -64,6 +67,19 @@ var src_default = {
       const body = await request.json();
       const userSchema = body.user_schema;
       const userContent = body.user_content;
+      const pdfSize = body.pdf_size;
+      if (!Number.isInteger(pdfSize) || pdfSize < 0) {
+        return Response.json(
+          { error: "pdf_size is required and must be a non-negative integer" },
+          { status: 400 }
+        );
+      }
+      if (pdfSize > MAX_PDF_SIZE) {
+        return Response.json(
+          { error: "The PDF must be 7 MB or smaller" },
+          { status: 413 }
+        );
+      }
       if (!userSchema) {
         return Response.json(
           { error: "user_schema is required" },
@@ -168,7 +184,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-V0xtRi/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-3JuHpM/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -200,7 +216,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-V0xtRi/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-3JuHpM/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

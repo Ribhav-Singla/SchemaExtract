@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Schema Extract",
   description: "Turn any PDF into structured, evidence-backed JSON.",
+  other: {
+    "google-site-verification": "6UYgTPcYS_g-wWl7p_O84ZN1yl-fMsJqJnh57KX5muo",
+  },
 };
 
 const themeInitScript = `

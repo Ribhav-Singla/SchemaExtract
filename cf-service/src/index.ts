@@ -1,10 +1,10 @@
-import { MAX_PDF_SIZE } from "../../web/lib/pdf";
-
 interface Env {
 	AI: Ai;
 }
 
 type JsonSchemaNode = Record<string, unknown>;
+
+const MAX_PDF_SIZE = 7 * 1024 * 1024; // 7 MB
 
 // Maps the schema's declared leaf type names (what the caller now puts as
 // values, e.g. "invoice_number": "string", "tax_rate": "double") to real

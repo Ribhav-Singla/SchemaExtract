@@ -9,9 +9,10 @@ interface SchemaEditorProps {
   id?: string;
   value: string;
   onChange: (value: string) => void;
+  maxLength?: number;
 }
 
-export default function SchemaEditor({ id, value, onChange }: SchemaEditorProps) {
+export default function SchemaEditor({ id, value, onChange, maxLength }: SchemaEditorProps) {
   const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const preRef = useRef<HTMLPreElement | null>(null);
@@ -45,7 +46,7 @@ export default function SchemaEditor({ id, value, onChange }: SchemaEditorProps)
   }
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-editor-bg shadow-[var(--shadow-card)]">
+    <div className="relative flex flex-col overflow-hidden rounded-2xl bg-editor-bg shadow-[var(--shadow-card)] lg:h-full">
       <button
         type="button"
         onClick={copySchema}
@@ -59,7 +60,7 @@ export default function SchemaEditor({ id, value, onChange }: SchemaEditorProps)
         )}
       </button>
 
-      <div className="flex h-72">
+      <div className="flex h-72 lg:h-auto lg:flex-1 lg:min-h-0">
         <div
           ref={gutterRef}
           aria-hidden="true"
@@ -83,6 +84,7 @@ export default function SchemaEditor({ id, value, onChange }: SchemaEditorProps)
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onScroll={(event) => syncScroll(event.currentTarget)}
+            maxLength={maxLength}
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"

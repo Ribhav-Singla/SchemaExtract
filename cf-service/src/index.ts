@@ -5,6 +5,7 @@ interface Env {
 type JsonSchemaNode = Record<string, unknown>;
 
 const MAX_PDF_SIZE = 7 * 1024 * 1024; // 7 MB
+const MAX_SCHEMA_LENGTH = 2_000;
 
 // Maps the schema's declared leaf type names (what the caller now puts as
 // values, e.g. "invoice_number": "string", "tax_rate": "double") to real
@@ -25,6 +26,46 @@ const TYPE_ALIASES: Record<string, string> = {
 	boolean: "boolean",
 	bool: "boolean",
 };
+
+// Workers AI sometimes returns the extracted data as a JSON-encoded string
+// (in `response.response`, or nested in `response.choices[i].message.content`)
+// instead of an already-parsed object, even when response_format: json_schema
+// was requested. Parse those fields in place so callers always receive real
+// JSON rather than an escaped string.
+function parseIfJsonString(value: unknown): unknown {
+	if (typeof value !== "string") {
+		return value;
+	}
+
+	const trimmed = value.trim();
+	if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+		return value;
+	}
+
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return value;
+	}
+}
+
+function normalizeAiResponse(response: any): any {
+	if (response && typeof response === "object") {
+		if ("response" in response) {
+			response.response = parseIfJsonString(response.response);
+		}
+
+		if (Array.isArray(response.choices)) {
+			for (const choice of response.choices) {
+				if (choice?.message && "content" in choice.message) {
+					choice.message.content = parseIfJsonString(choice.message.content);
+				}
+			}
+		}
+	}
+
+	return response;
+}
 
 function resolveLeafType(value: unknown): string {
 	if (typeof value === "string") {
@@ -117,6 +158,13 @@ export default {
 				);
 			}
 
+			if (JSON.stringify(userSchema).length > MAX_SCHEMA_LENGTH) {
+				return Response.json(
+					{ error: `user_schema must be ${MAX_SCHEMA_LENGTH.toLocaleString()} characters or fewer` },
+					{ status: 413 }
+				);
+			}
+
 			if (!userContent) {
 				return Response.json(
 					{ error: "user_content is required" },
@@ -124,9 +172,30 @@ export default {
 				);
 			}
 
+			const DATE_FORMATS = [
+				"DD-MM-YYYY", "MM-DD-YYYY", "YYYY-MM-DD", "DD-MM", "DD Mon YYYY", "Mon DD, YYYY",
+			];
+			const STRING_CASES = ["Proper Case", "camelCase", "PascalCase", "UPPERCASE", "lowercase"];
+			const NUMBER_FORMATS = ["Plain", "2 decimals", "Comma-separated", "Compact"];
+
+			const dateFormat = DATE_FORMATS.includes(body.date_format) ? body.date_format : DATE_FORMATS[0];
+			const stringCase = STRING_CASES.includes(body.string_case) ? body.string_case : STRING_CASES[0];
+			const numberFormat = NUMBER_FORMATS.includes(body.number_format) ? body.number_format : NUMBER_FORMATS[0];
+
+			const formattingInstructions = `
+				Formatting rules (apply on top of the schema's data types):
+				- Fields typed "date" or "datetime": format the value as ${dateFormat}.
+				- Fields typed "string" (not enum-like codes or identifiers): use ${stringCase}.
+				- Fields typed "number", "integer", "float", "double", "decimal", or "long": format as ${numberFormat}.
+				- These rules never apply to null values or to fields whose type is not one of the above.
+				`
+			;
+
 			// Hardcoded prompt
 			const extractionPrompt = `
 				Extract the requested fields from the document excerpts. Return only one valid JSON object matching the schema below, where each value names the expected data type for that field. Use null for a field that is not supported by the excerpts. Do not invent information.
+
+				${formattingInstructions}
 
 				Schema:
 				${JSON.stringify(userSchema, null, 2)}
@@ -157,14 +226,12 @@ export default {
 						json_schema: buildJsonSchema(userSchema)
 					},
 
-					max_tokens: 2048,
+					max_tokens: 4096,
 					temperature: 0.1
 				}
 			);
 
-			console.log("AI response:", response);
-
-			return Response.json(response);
+			return Response.json(normalizeAiResponse(response));
 
 		} catch (error) {
 

@@ -3,6 +3,7 @@
 import {
   BarChart3,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Eye,
@@ -23,7 +24,7 @@ import HeroIllustration from "./components/HeroIllustration";
 import JsonViewer from "./components/JsonViewer";
 import SchemaEditor from "./components/SchemaEditor";
 import ThemeToggle from "./components/ThemeToggle";
-import { hasPdfSignature, MAX_PDF_SIZE } from "../lib/pdf";
+import { hasPdfSignature, MAX_PDF_SIZE, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../lib/pdf";
 
 interface ExtractionUsage {
   prompt_tokens: number;
@@ -91,6 +92,30 @@ function findInvalidSchemaType(node: unknown): string | null {
 
   return String(node);
 }
+
+const DATE_FORMAT_OPTIONS = [
+  "DD-MM-YYYY",
+  "MM-DD-YYYY",
+  "YYYY-MM-DD",
+  "DD-MM",
+  "DD Mon YYYY",
+  "Mon DD, YYYY",
+];
+
+const STRING_CASE_OPTIONS = [
+  "Proper Case",
+  "camelCase",
+  "PascalCase",
+  "UPPERCASE",
+  "lowercase",
+];
+
+const NUMBER_FORMAT_OPTIONS = [
+  "Plain",
+  "2 decimals",
+  "Comma-separated",
+  "Compact",
+];
 
 const EXAMPLE_SCHEMA = `{
   "research_area": "string",
@@ -361,12 +386,56 @@ export default function Home() {
   // the pipeline animation remounts (stageIndex/elapsedMs reset to 0)
   // instead of resuming from wherever the previous run left off.
   const [runId, setRunId] = useState(0);
+  const [formattingOpen, setFormattingOpen] = useState(false);
+  const [dateFormat, setDateFormat] = useState(DATE_FORMAT_OPTIONS[0]);
+  const [stringCase, setStringCase] = useState(STRING_CASE_OPTIONS[0]);
+  const [numberFormat, setNumberFormat] = useState(NUMBER_FORMAT_OPTIONS[0]);
+  const [schemaCardHeight, setSchemaCardHeight] = useState<number | undefined>(undefined);
+  const leftColumnRef = useRef<HTMLDivElement | null>(null);
+
+  // Keeps the extraction-schema card the same height as the source-PDF +
+  // output-format stack on desktop. Only re-measures while the output-format
+  // panel is collapsed, so opening it doesn't stretch the schema card too.
+  useEffect(() => {
+    const leftEl = leftColumnRef.current;
+    if (!leftEl) return;
+
+    const desktop = window.matchMedia("(min-width: 1024px)");
+
+    function measure() {
+      if (!desktop.matches) {
+        setSchemaCardHeight(undefined);
+        return;
+      }
+      if (formattingOpen) return;
+      if (leftEl) setSchemaCardHeight(leftEl.getBoundingClientRect().height);
+    }
+
+    measure();
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(leftEl);
+    desktop.addEventListener("change", measure);
+
+    return () => {
+      resizeObserver.disconnect();
+      desktop.removeEventListener("change", measure);
+    };
+  }, [formattingOpen]);
   // --- Only used by the (currently hidden) chunks view below.
   // const [activeTab, setActiveTab] = useState<"all" | "top">("all");
   // const [resultTab, setResultTab] = useState<"chunks" | "extraction">("chunks");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Matches the backend's normalizeSchemaText() so the on-screen count and
+  // the enforced limit never disagree about how long the schema is.
+  const schemaLength = useMemo(() => normalizeSchemaText(schema).length, [schema]);
+
   const schemaError = useMemo(() => {
+    if (schemaLength > MAX_SCHEMA_LENGTH) {
+      return `Schema must be ${MAX_SCHEMA_LENGTH.toLocaleString()} characters or fewer.`;
+    }
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(schema);
@@ -380,7 +449,7 @@ export default function Home() {
     }
 
     return null;
-  }, [schema]);
+  }, [schema, schemaLength]);
 
   const schemaIsValid = schemaError === null;
 
@@ -436,6 +505,9 @@ export default function Home() {
     const formData = new FormData();
     formData.append("pdf", pdf);
     formData.append("schema", schema);
+    formData.append("date_format", dateFormat);
+    formData.append("string_case", stringCase);
+    formData.append("number_format", numberFormat);
     setRunId((id) => id + 1);
     setLoading(true);
 
@@ -574,8 +646,9 @@ export default function Home() {
 
         <form
           onSubmit={analyse}
-          className="mt-12 grid gap-6 lg:grid-cols-[0.8fr_1.2fr]"
+          className="mt-12 grid items-start gap-6 lg:grid-cols-[0.8fr_1.2fr]"
         >
+          <div ref={leftColumnRef} className="flex flex-col gap-6">
           <div className="rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-baseline gap-2">
@@ -688,7 +761,100 @@ export default function Home() {
             )}
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
+          <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-card)]">
+            <button
+              type="button"
+              onClick={() => setFormattingOpen((open) => !open)}
+              aria-expanded={formattingOpen}
+              aria-controls="output-formatting-body"
+              className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+            >
+              <span className="flex items-baseline gap-2">
+                <span className="font-mono text-xs text-accent">03</span>
+                <span className="text-sm font-semibold uppercase tracking-wider">
+                  Output format
+                </span>
+              </span>
+              <span className="flex items-center gap-2.5">
+                <span className="hidden font-mono text-[11px] text-muted sm:inline">
+                  Advanced
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-muted transition-transform duration-200 ${formattingOpen ? "rotate-180" : ""}`}
+                  strokeWidth={1.75}
+                />
+              </span>
+            </button>
+
+            <div
+              id="output-formatting-body"
+              className={`grid transition-[grid-template-rows] duration-200 ease-out ${formattingOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
+            >
+              <div className="overflow-hidden">
+                <div className="grid gap-3 border-t border-border px-6 py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor="date-format" className="text-sm font-medium">
+                      Date format
+                    </label>
+                    <select
+                      id="date-format"
+                      value={dateFormat}
+                      onChange={(event) => setDateFormat(event.target.value)}
+                      className="min-w-[11rem] rounded-lg border border-border bg-surface-2 px-3 py-1.5 font-mono text-xs text-fg outline-none transition focus:border-accent"
+                    >
+                      {DATE_FORMAT_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor="string-case" className="text-sm font-medium">
+                      String case
+                    </label>
+                    <select
+                      id="string-case"
+                      value={stringCase}
+                      onChange={(event) => setStringCase(event.target.value)}
+                      className="min-w-[11rem] rounded-lg border border-border bg-surface-2 px-3 py-1.5 font-mono text-xs text-fg outline-none transition focus:border-accent"
+                    >
+                      {STRING_CASE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor="number-format" className="text-sm font-medium">
+                      Number format
+                    </label>
+                    <select
+                      id="number-format"
+                      value={numberFormat}
+                      onChange={(event) => setNumberFormat(event.target.value)}
+                      className="min-w-[11rem] rounded-lg border border-border bg-surface-2 px-3 py-1.5 font-mono text-xs text-fg outline-none transition focus:border-accent"
+                    >
+                      {NUMBER_FORMAT_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          <div
+            className="rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-card)] lg:flex lg:flex-col"
+            style={schemaCardHeight ? { height: schemaCardHeight } : undefined}
+          >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-baseline gap-2">
                 <span className="font-mono text-xs text-accent">02</span>
@@ -698,6 +864,15 @@ export default function Home() {
                 >
                   Extraction schema
                 </label>
+                <span
+                  className={`font-mono text-[11px] tabular-nums ${
+                    schemaLength > MAX_SCHEMA_LENGTH * 0.9
+                      ? "text-amber-500"
+                      : "text-muted"
+                  }`}
+                >
+                  ({schemaLength.toLocaleString()}/{MAX_SCHEMA_LENGTH.toLocaleString()})
+                </span>
               </div>
 
               <div className="flex items-center gap-3">
@@ -746,8 +921,13 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-4">
-              <SchemaEditor id="schema" value={schema} onChange={setSchema} />
+            <div className="mt-4 lg:min-h-0 lg:flex-1">
+              <SchemaEditor
+                id="schema"
+                value={schema}
+                onChange={setSchema}
+                maxLength={MAX_SCHEMA_LENGTH}
+              />
             </div>
           </div>
         </form>

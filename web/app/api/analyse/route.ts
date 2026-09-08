@@ -6,7 +6,8 @@ import { randomUUID } from "crypto";
 
 import { runPipeline } from "../../../lib/main";
 import { getSchemaExtractDatabase } from "../../../lib/mongodb";
-import { hasPdfSignature, MAX_PDF_SIZE } from "../../../lib/pdf";
+import { hasPdfSignature, MAX_PDF_SIZE, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../../../lib/pdf";
+import { normalizeExtractionData } from "../../../lib/normalize-extraction";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,9 @@ export async function POST(request: NextRequest) {
 		const formData = await request.formData();
 		const pdf = formData.get("pdf");
 		const schemaValue = formData.get("schema");
+		const dateFormat = formData.get("date_format");
+		const stringCase = formData.get("string_case");
+		const numberFormat = formData.get("number_format");
 
 		if (!(pdf instanceof File) || pdf.size === 0) {
 			return NextResponse.json(
@@ -61,10 +65,19 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
+		const normalizedSchema = normalizeSchemaText(schemaValue);
+
+		if (normalizedSchema.length > MAX_SCHEMA_LENGTH) {
+			return NextResponse.json(
+				{ error: `The schema must be ${MAX_SCHEMA_LENGTH.toLocaleString()} characters or fewer` },
+				{ status: 413 }
+			);
+		}
+
 		let schema: unknown;
 
 		try {
-			schema = JSON.parse(schemaValue);
+			schema = JSON.parse(normalizedSchema);
 		} catch {
 			return NextResponse.json(
 				{ error: "The schema must contain valid JSON" },
@@ -104,11 +117,16 @@ export async function POST(request: NextRequest) {
 					user_schema: schema,
 					user_content: result.ranked_chunks,
 					pdf_size: pdf.size,
+					date_format: typeof dateFormat === "string" ? dateFormat : undefined,
+					string_case: typeof stringCase === "string" ? stringCase : undefined,
+					number_format: typeof numberFormat === "string" ? numberFormat : undefined,
 				}),
 			}
 		);
 
-		const extractionData: unknown = await extractionResponse.json();
+		const extractionData: unknown = normalizeExtractionData(
+			await extractionResponse.json()
+		);
 
 		if (!extractionResponse.ok) {
 			const workerError =

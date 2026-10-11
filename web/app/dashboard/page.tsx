@@ -498,9 +498,7 @@ export default function DashboardPage() {
                 disabled={systemLoading}
                 className="flex items-center gap-2 rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted transition hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${systemLoading ? "animate-spin" : ""}`}
-                />
+                <RefreshCw className={`h-3.5 w-3.5 ${systemLoading ? "animate-spin" : ""}`} />
                 Refresh server
               </button>
             </div>

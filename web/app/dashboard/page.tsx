@@ -213,7 +213,7 @@ export default function DashboardPage() {
     setSystemLoading(true);
     setSystemError("");
     try {
-      const response = await fetch("/api/dashboard/system");
+      const response = await fetch("/api/dashboard");
       const body = await response.json();
       if (!response.ok)
         throw new Error(body.error ?? "Could not load system metrics");

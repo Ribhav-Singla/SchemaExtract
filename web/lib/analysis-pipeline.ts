@@ -3,13 +3,13 @@ import os from "os";
 import path from "path";
 import { randomUUID } from "crypto";
 
-import { runPipeline, type PipelineResult } from "../../../lib/main";
+import { runPipeline, type PipelineResult } from "./main";
 import {
   hasPdfSignature,
   MAX_PDF_SIZE,
   MAX_SCHEMA_LENGTH,
   normalizeSchemaText,
-} from "../../../lib/pdf";
+} from "./pdf";
 
 export class PipelineRequestError extends Error {
   constructor(

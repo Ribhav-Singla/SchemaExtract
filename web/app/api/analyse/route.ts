@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   PipelineRequestError,
   runAnalysisPipeline,
-} from "./pipeline";
+} from "../../../lib/analysis-pipeline";
 
 export const runtime = "nodejs";
 

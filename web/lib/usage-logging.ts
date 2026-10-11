@@ -1,7 +1,7 @@
 import { getSchemaExtractDatabase } from "./mongodb";
 
 export interface ExtractionUsageLog {
-  provider: "puter" | "worker";
+  provider: "puter" | "worker" | "apinex";
   pdfName: string;
   pdfSize: number;
   userSchema: Record<string, unknown>;

@@ -555,8 +555,8 @@ export default function Home() {
           usageDetails: extracted.usageDetails,
           model: process.env.NEXT_PUBLIC_PUTER_MODEL ?? "gpt-5.6-luna",
         });
-      } else {
-        const extractionResponse = await fetch("/api/extract", {
+      } else if (extraction_provider === "apinex") {
+        const extractionResponse = await fetch("/api/extract/apinex", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -569,6 +569,38 @@ export default function Home() {
             custom_rules: customRules,
           }),
         });
+        const extractionBody = await extractionResponse.json();
+
+        if (!extractionResponse.ok) {
+          throw new Error(extractionBody.error ?? "Apinex extraction failed");
+        }
+
+        setResult(body);
+        setExtractionResult(extractionBody);
+        void logUsage({
+          provider: "apinex",
+          topKChunks: body.ranked_chunks,
+          response: extractionBody.response,
+          usage: extractionBody.usage,
+          model: extractionBody.model,
+        });
+      } else {
+        const extractionResponse = await fetch(
+          "/api/extract",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_schema: JSON.parse(schema),
+              user_content: body.ranked_chunks,
+              pdf_size: pdf.size,
+              date_format: dateFormat,
+              string_case: stringCase,
+              number_format: numberFormat,
+              custom_rules: customRules,
+            }),
+          },
+        );
         const extractionBody = await extractionResponse.json();
 
         if (!extractionResponse.ok) {
@@ -603,7 +635,7 @@ export default function Home() {
       usageDetails,
       model,
     }: {
-      provider: "puter" | "worker";
+      provider: "puter" | "worker" | "apinex";
       response: unknown;
       topKChunks: unknown[];
       usage?: unknown;

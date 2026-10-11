@@ -16,6 +16,27 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Extraction providers
+
+The default provider is Puter. To use Apinex instead, set:
+
+```env
+NEXT_PUBLIC_EXTRACTION_PROVIDER=apinex
+APINEX_API_KEY=your-api-key
+APINEX_MODEL=claude-sonnet-5.5
+```
+
+`APINEX_API_KEY` is read only by the server and is never sent to the browser.
+
+The usage dashboard uses server-side credentials:
+
+```env
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=change-this-password
+```
+
+The dashboard currently checks the configured credentials in the browser only; do not use this approach for sensitive production data.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -9,7 +9,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     if (
-      (body.provider !== "puter" && body.provider !== "worker") ||
+      (body.provider !== "puter" &&
+        body.provider !== "worker" &&
+        body.provider !== "apinex") ||
       typeof body.pdf_name !== "string" ||
       !Number.isInteger(body.pdf_size) ||
       typeof body.user_schema !== "object" ||

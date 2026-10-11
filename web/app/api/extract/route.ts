@@ -25,7 +25,8 @@ export async function POST(request: NextRequest) {
 
 		// Forward the request to the external extraction API
 		const extractionResponse = await fetch(
-			"https://extraction-ai.ticketfusion.workers.dev",
+			process.env.EXTRACTION_WORKER_URL ??
+				"https://extraction-ai.ticketfusion.workers.dev",
 			{
 				method: "POST",
 				headers: {

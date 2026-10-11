@@ -177,6 +177,7 @@ export default {
 			];
 			const STRING_CASES = ["Proper Case", "camelCase", "PascalCase", "UPPERCASE", "lowercase"];
 			const NUMBER_FORMATS = ["Plain", "2 decimals", "Comma-separated", "Compact"];
+			const customRules = typeof body.custom_rules === "string" ? body.custom_rules : "";
 
 			const dateFormat = DATE_FORMATS.includes(body.date_format) ? body.date_format : DATE_FORMATS[0];
 			const stringCase = STRING_CASES.includes(body.string_case) ? body.string_case : STRING_CASES[0];
@@ -196,6 +197,8 @@ export default {
 				Extract the requested fields from the document excerpts. Return only one valid JSON object matching the schema below, where each value names the expected data type for that field. Use null for a field that is not supported by the excerpts. Do not invent information.
 
 				${formattingInstructions}
+
+				${customRules ? `Additional custom rules:\n${customRules}` : ""}
 
 				Schema:
 				${JSON.stringify(userSchema, null, 2)}

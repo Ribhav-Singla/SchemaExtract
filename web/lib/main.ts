@@ -48,7 +48,7 @@ export async function runPipeline(
         pdf,
         outputDir = "output",
         schema,
-        topK = 5,
+        topK = 8,
         threshold = 0.5,
     } = options;
 

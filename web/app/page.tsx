@@ -24,6 +24,7 @@ import HeroIllustration from "./components/HeroIllustration";
 import JsonViewer from "./components/JsonViewer";
 import SchemaEditor from "./components/SchemaEditor";
 import ThemeToggle from "./components/ThemeToggle";
+import { runPuterExtraction } from "./lib/puter";
 import { hasPdfSignature, MAX_PDF_SIZE, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../lib/pdf";
 
 interface ExtractionUsage {
@@ -43,6 +44,7 @@ interface ExtractionChoice {
 interface ExtractionResponse {
   choices?: ExtractionChoice[];
   usage?: ExtractionUsage;
+  usageDetails?: Record<string, unknown>;
   response?: Record<string, unknown>;
   model?: string;
   created?: number;
@@ -390,6 +392,8 @@ export default function Home() {
   const [dateFormat, setDateFormat] = useState(DATE_FORMAT_OPTIONS[0]);
   const [stringCase, setStringCase] = useState(STRING_CASE_OPTIONS[0]);
   const [numberFormat, setNumberFormat] = useState(NUMBER_FORMAT_OPTIONS[0]);
+  const [customRules, setCustomRules] = useState("");
+  const [customRulesOpen, setCustomRulesOpen] = useState(false);
   const [schemaCardHeight, setSchemaCardHeight] = useState<number | undefined>(undefined);
   const leftColumnRef = useRef<HTMLDivElement | null>(null);
 
@@ -508,8 +512,14 @@ export default function Home() {
     formData.append("date_format", dateFormat);
     formData.append("string_case", stringCase);
     formData.append("number_format", numberFormat);
+    formData.append("custom_rules", customRules);
     setRunId((id) => id + 1);
     setLoading(true);
+
+    const extraction_provider =
+      process.env.NEXT_PUBLIC_EXTRACTION_PROVIDER ??
+      process.env.EXTRACTION_PROVIDER ??
+      "puter";
 
     try {
       const response = await fetch("/api/analyse", {
@@ -522,8 +532,59 @@ export default function Home() {
         throw new Error(body.error ?? "Analysis failed");
       }
 
-      setResult(body);
-      setExtractionResult(body.extraction_response ?? null);
+      if (extraction_provider === "puter") {
+        const extracted = await runPuterExtraction({
+          schema: JSON.parse(schema),
+          chunks: body.ranked_chunks,
+          dateFormat,
+          stringCase,
+          numberFormat,
+          customRules,
+        });
+
+        setResult(body);
+        setExtractionResult({
+          response: extracted.response,
+          usageDetails: extracted.usageDetails,
+          model: process.env.NEXT_PUBLIC_PUTER_MODEL ?? "gpt-5.6-luna",
+        });
+        void logUsage({
+          provider: "puter",
+          topKChunks: body.ranked_chunks,
+          response: extracted.response,
+          usageDetails: extracted.usageDetails,
+          model: process.env.NEXT_PUBLIC_PUTER_MODEL ?? "gpt-5.6-luna",
+        });
+      } else {
+        const extractionResponse = await fetch("/api/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_schema: JSON.parse(schema),
+            user_content: body.ranked_chunks,
+            pdf_size: pdf.size,
+            date_format: dateFormat,
+            string_case: stringCase,
+            number_format: numberFormat,
+            custom_rules: customRules,
+          }),
+        });
+        const extractionBody = await extractionResponse.json();
+
+        if (!extractionResponse.ok) {
+          throw new Error(extractionBody.error ?? "Extraction failed");
+        }
+
+        setResult(body);
+        setExtractionResult(extractionBody);
+        void logUsage({
+          provider: "worker",
+          topKChunks: body.ranked_chunks,
+          response: extractionBody.response ?? extractionBody,
+          usage: extractionBody.usage,
+          model: extractionBody.model,
+        });
+      }
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -532,6 +593,44 @@ export default function Home() {
       );
     } finally {
       setLoading(false);
+    }
+
+    async function logUsage({
+      provider,
+      response,
+      topKChunks,
+      usage,
+      usageDetails,
+      model,
+    }: {
+      provider: "puter" | "worker";
+      response: unknown;
+      topKChunks: unknown[];
+      usage?: unknown;
+      usageDetails?: unknown;
+      model?: string;
+    }) {
+      const loggingResponse = await fetch("/api/usage/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          pdf_name: pdf?.name,
+          pdf_size: pdf?.size,
+          user_schema: JSON.parse(schema),
+          top_k_chunks: topKChunks,
+          response,
+          usage,
+          usageDetails,
+          model,
+          custom_rules: customRules,
+        }),
+      });
+
+      if (!loggingResponse.ok) {
+        const body = await loggingResponse.json().catch(() => ({}));
+        throw new Error(body.error ?? "Failed to log extraction usage");
+      }
     }
   }
 
@@ -848,7 +947,8 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </div>
+
+            </div>
           </div>
 
           <div
@@ -928,6 +1028,73 @@ export default function Home() {
                 onChange={setSchema}
                 maxLength={MAX_SCHEMA_LENGTH}
               />
+            </div>
+            
+          </div>
+          <div className="w-full rounded-2xl border border-border bg-surface shadow-[var(--shadow-card)] lg:col-span-2">
+            <button
+              type="button"
+              onClick={() => setCustomRulesOpen((open) => !open)}
+              aria-expanded={customRulesOpen}
+              aria-controls="custom-rules-body"
+              className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+            >
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-xs text-accent">04</span>
+                <span className="text-sm font-semibold uppercase tracking-wider">
+                  Custom rules
+                </span>
+              </div>
+              <span className="flex items-center gap-3">
+                <span className="font-mono text-[11px] tabular-nums text-muted">
+                  ({customRules.length.toLocaleString()}/2,000)
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setCustomRules("");
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setCustomRules("");
+                    }
+                  }}
+                  className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted transition hover:text-accent"
+                >
+                  <RotateCcw className="h-3 w-3" strokeWidth={2} />
+                  Reset
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted transition-transform duration-200 ${
+                    customRulesOpen ? "rotate-180" : ""
+                  }`}
+                  strokeWidth={1.75}
+                />
+              </span>
+            </button>
+            <div
+              id="custom-rules-body"
+              className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                customRulesOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+              }`}
+            >
+              <div className="overflow-hidden">
+                <div className="border-t border-border px-6 py-4">
+                  <textarea
+                    id="custom-rules"
+                    value={customRules}
+                    onChange={(event) => setCustomRules(event.target.value)}
+                    maxLength={2000}
+                    rows={5}
+                    placeholder="Add extra instructions for the extraction model..."
+                    className="w-full resize-y rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm leading-6 text-fg outline-none transition placeholder:text-muted focus:border-accent"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </form>
@@ -1178,6 +1345,28 @@ export default function Home() {
                           {extractionResult.usage.total_tokens}
                         </span>
                       </div>
+                    </div>
+                  </div>
+                )}
+                {extractionResult.usageDetails && (
+                  <div className="mt-4 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
+                    <h3 className="font-semibold text-fg">Usage details</h3>
+                    <div className="mt-3 space-y-2 text-xs">
+                      {Object.entries(extractionResult.usageDetails).map(
+                        ([key, value]) => (
+                          <div
+                            key={key}
+                            className="flex justify-between gap-4 border-b border-border pb-2 last:border-0 last:pb-0"
+                          >
+                            <span className="text-muted">{key}</span>
+                            <span className="max-w-[70%] break-words text-right font-mono font-semibold text-fg">
+                              {typeof value === "object"
+                                ? JSON.stringify(value)
+                                : String(value)}
+                            </span>
+                          </div>
+                        ),
+                      )}
                     </div>
                   </div>
                 )}

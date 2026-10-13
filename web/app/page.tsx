@@ -642,7 +642,7 @@ export default function Home() {
       usageDetails?: unknown;
       model?: string;
     }) {
-      const loggingResponse = await fetch("/api/usage/log", {
+      const loggingResponse = await fetch("/api/usage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

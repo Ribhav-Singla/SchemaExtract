@@ -75,7 +75,7 @@ APINEX_API_KEY=your-api-key
 APINEX_MODEL=free/gpt-6-luna
 ```
 
-Successful extraction usage is logged to MongoDB through `/api/usage/log`. Apinex token usage is stored from the provider response and displayed separately from Puter and Worker usage.
+Successful extraction usage is logged to MongoDB through `/api/usage`. Apinex token usage is stored from the provider response and displayed separately from Puter and Worker usage.
 
 ## Useful commands
 

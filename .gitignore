@@ -1,54 +1,43 @@
-node_modules/
-.next/
-tsconfig.tsbuildinfo
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Byte-compiled / optimized Python files
-__pycache__/
-*.py[cod]
-*$py.class
+# dependencies
+**/node_modules**
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
+# testing
+/coverage
 
-# Packaging and build artifacts
-.Python
-build/
-dist/
-*.egg-info/
-.eggs/
+# next.js
+**/.next/**
+/out/
 
-# Test and tooling caches
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
+# production
+/build
 
-# Jupyter and IPython
-.ipynb_checkpoints/
-
-# Environment and local configuration
-.env
-.env.*
-!.env.example
-
-# macOS
+# misc
 .DS_Store
+*.pem
 
-# Editors and IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# Logs and local data
-*.log
-*.sqlite3
+# env files (can opt-in for committing if needed)
+.env*
 
-**/output/**
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+**/.wrangler/**

@@ -10,16 +10,25 @@ import natural from "natural";
 
 import type { Chunk } from "./types";
 
-// Serverless platforms (e.g. Vercel) ship a read-only deployment bundle, so
-// the model cache can't live inside node_modules. /tmp is the only writable
-// directory available at runtime, so redirect the cache there everywhere.
-env.cacheDir = path.join(os.tmpdir(), "transformers-cache");
+// The deployment build can populate this directory with the model artifacts.
+// Keep /tmp as the development and fallback cache so local runs do not need a
+// checked-in model directory.
+const bundledCacheDir = path.join(process.cwd(), "models", "transformers-cache");
+env.cacheDir = process.env.NODE_ENV === "production"
+  ? bundledCacheDir
+  : path.join(os.tmpdir(), "transformers-cache");
+env.allowRemoteModels = process.env.NODE_ENV !== "production";
 
 export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+const embeddingSource = env.allowRemoteModels ? "remote-or-cache" : "bundled-cache";
 
 const embeddingModels = new Map<string, Promise<FeatureExtractionPipeline>>();
 
-function loadEmbeddingModel(
+function logEmbeddingEvent(event: string, details: Record<string, unknown> = {}) {
+  console.info(JSON.stringify({ component: "embedding", event, ...details }));
+}
+
+export function loadEmbeddingModel(
   modelName: string,
 ): Promise<FeatureExtractionPipeline> {
   const existingModel = embeddingModels.get(modelName);
@@ -28,12 +37,25 @@ function loadEmbeddingModel(
     return existingModel;
   }
 
-  console.log(`Loading embedding model: ${modelName}`);
+  const startedAt = performance.now();
 
   const modelPromise = pipeline("feature-extraction", modelName)
-    .then((model) => model as FeatureExtractionPipeline)
+    .then((model) => {
+      logEmbeddingEvent("model_load_ready", {
+        model: modelName,
+        source: embeddingSource,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return model as FeatureExtractionPipeline;
+    })
     .catch((error) => {
       embeddingModels.delete(modelName);
+      logEmbeddingEvent("model_load_failed", {
+        model: modelName,
+        source: embeddingSource,
+        durationMs: Math.round(performance.now() - startedAt),
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     });
 
@@ -42,8 +64,12 @@ function loadEmbeddingModel(
   return modelPromise;
 }
 
-void loadEmbeddingModel(EMBEDDING_MODEL).catch((error) => {
-  console.error(`Failed to load embedding model: ${EMBEDDING_MODEL}`, error);
+export function warmEmbeddingModel(): Promise<FeatureExtractionPipeline> {
+  return loadEmbeddingModel(EMBEDDING_MODEL);
+}
+
+void warmEmbeddingModel().catch((error) => {
+  console.error("Embedding model startup warm-up failed", error);
 });
 
 // Embeddings are content-addressed by (model, chunkId, charCount) so that
@@ -910,6 +936,7 @@ export class ChunkRetriever {
       return [];
     }
 
+    const startedAt = performance.now();
     const model = await this.loadModel();
 
     const output = await model(texts, {
@@ -926,6 +953,12 @@ export class ChunkRetriever {
     for (let i = 0; i < texts.length; i++) {
       vectors.push(Array.from(data.subarray(i * hidden, (i + 1) * hidden)));
     }
+
+    logEmbeddingEvent("batch_complete", {
+      model: this.embeddingModelName,
+      count: texts.length,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
 
     return vectors;
   }
@@ -967,6 +1000,13 @@ export class ChunkRetriever {
       });
     }
 
+    logEmbeddingEvent("chunk_cache_summary", {
+      model: this.embeddingModelName,
+      total: chunks.length,
+      hits: chunks.length - missTexts.length,
+      misses: missTexts.length,
+    });
+
     return results as number[][];
   }
 
@@ -980,6 +1020,13 @@ export class ChunkRetriever {
     if (chunks.length === 0) {
       return [];
     }
+
+    const startedAt = performance.now();
+    logEmbeddingEvent("retrieval_start", {
+      model: this.embeddingModelName,
+      chunks: chunks.length,
+      topK,
+    });
 
     const { adaptiveWeights = true, diversify = true, mmrLambda = 0.7 } =
       options;
@@ -1085,6 +1132,13 @@ export class ChunkRetriever {
 
     selected.forEach((chunk, index) => {
       chunk.rank = index + 1;
+    });
+
+    logEmbeddingEvent("retrieval_complete", {
+      model: this.embeddingModelName,
+      chunks: chunks.length,
+      selected: selected.length,
+      durationMs: Math.round(performance.now() - startedAt),
     });
 
     return selected;

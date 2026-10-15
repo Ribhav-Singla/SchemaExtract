@@ -8,6 +8,7 @@ Run the application from the `web` directory:
 
 ```powershell
 npm install
+npm run download:model
 npm run dev
 ```
 
@@ -87,3 +88,12 @@ npm run build
 ```
 
 The project uses Next.js, React, Tailwind CSS, Lucide icons, Recharts, MongoDB, and the Hugging Face Transformers runtime.
+
+### Embedding model deployment
+
+The retrieval model is downloaded into `web/models/transformers-cache/` and is
+ignored by Git because it is a generated deployment artifact. Run
+`npm run download:model` once before building or deploying. Production loads
+the model from this local cache and does not download it during the first user
+request. Opening the home page also calls `/api/model-status` to warm the
+process while the user selects a PDF and schema.

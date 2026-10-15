@@ -8,7 +8,10 @@ const nextConfig: NextConfig = {
     "onnxruntime-node",
   ],
   outputFileTracingIncludes: {
-    "/api/**/*": ["./node_modules/onnxruntime-node/bin/**/*"],
+    "/api/**/*": [
+      "./node_modules/onnxruntime-node/bin/**/*",
+      "./models/transformers-cache/**/*",
+    ],
   },
 };
 

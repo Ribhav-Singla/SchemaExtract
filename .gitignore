@@ -41,3 +41,6 @@ yarn-error.log*
 next-env.d.ts
 
 **/.wrangler/**
+
+# Downloaded Transformers.js model artifacts
+web/models/transformers-cache/

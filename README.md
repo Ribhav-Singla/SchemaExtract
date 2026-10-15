@@ -1,6 +1,6 @@
 # SchemaExtract
 
-SchemaExtract is a two-part application for extracting and presenting database schema metadata.
+SchemaExtract is a two-part application for extracting and presenting database schema  metadata.
 
 ## Project structure
 

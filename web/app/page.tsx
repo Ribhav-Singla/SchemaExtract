@@ -433,7 +433,7 @@ export default function Home() {
   useEffect(() => {
     const startedAt = performance.now();
 
-    void fetch("/api/model-status")
+    void fetch("/api/analyse")
       .then((response) => {
         if (!response.ok) {
           console.warn("[model-warmup] request failed", {

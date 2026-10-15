@@ -72,11 +72,7 @@ void warmEmbeddingModel().catch((error) => {
   console.error("Embedding model startup warm-up failed", error);
 });
 
-// Embeddings are content-addressed by (model, chunkId, charCount) so that
-// re-running retrieval against the same document with a different schema
-// (a common flow: user tweaks the schema and re-extracts) reuses vectors
-// instead of re-running the model. Capped and FIFO-evicted to bound memory
-// on long-lived serverless instances.
+
 const EMBEDDING_CACHE_LIMIT = 4000;
 const embeddingCache = new Map<string, number[]>();
 

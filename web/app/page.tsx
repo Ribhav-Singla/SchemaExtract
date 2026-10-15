@@ -426,6 +426,30 @@ export default function Home() {
       desktop.removeEventListener("change", measure);
     };
   }, [formattingOpen]);
+
+  // Start server-side model warm-up while the user is selecting a PDF and
+  // schema. The request is deliberately best-effort; analysis still shares
+  // the same singleton promise if warm-up has not finished yet.
+  useEffect(() => {
+    const startedAt = performance.now();
+
+    void fetch("/api/model-status")
+      .then((response) => {
+        if (!response.ok) {
+          console.warn("[model-warmup] request failed", {
+            status: response.status,
+            durationMs: Math.round(performance.now() - startedAt),
+          });
+        }
+      })
+      .catch((error) => {
+        console.warn("[model-warmup] request failed", {
+          durationMs: Math.round(performance.now() - startedAt),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }, []);
+
   // --- Only used by the (currently hidden) chunks view below.
   // const [activeTab, setActiveTab] = useState<"all" | "top">("all");
   // const [resultTab, setResultTab] = useState<"chunks" | "extraction">("chunks");
@@ -520,7 +544,6 @@ export default function Home() {
       process.env.NEXT_PUBLIC_EXTRACTION_PROVIDER ??
       process.env.EXTRACTION_PROVIDER ??
       "puter";
-
     try {
       const response = await fetch("/api/analyse", {
         method: "POST",
@@ -570,7 +593,6 @@ export default function Home() {
           }),
         });
         const extractionBody = await extractionResponse.json();
-
         if (!extractionResponse.ok) {
           throw new Error(extractionBody.error ?? "Apinex extraction failed");
         }

@@ -14,21 +14,12 @@ function parseDateParam(value: string | null, paramName: string): Date | undefin
   return parsed;
 }
 
-type ProviderSummary = {
-  _id?: string;
+type UsageSummary = {
   totalRequests?: number;
-  totalNeurons?: number;
   totalPromptTokens?: number;
   totalCompletionTokens?: number;
   totalTokens?: number;
   totalPdfBytes?: number;
-};
-
-type ProviderDay = {
-  _id: { provider: string; day: string };
-  requests: number;
-  neurons: number;
-  totalTokens: number;
 };
 
 export async function GET(request: NextRequest) {
@@ -37,7 +28,8 @@ export async function GET(request: NextRequest) {
     const from = parseDateParam(params.get("from"), "from");
     const to = parseDateParam(params.get("to"), "to");
     const pdfName = params.get("pdf_name");
-    const match: Record<string, unknown> = {};
+    // Older rows from removed providers stay in the collection; only report Claude.
+    const match: Record<string, unknown> = { provider: "claude" };
 
     if (from || to) {
       const createdOn: Record<string, Date> = {};
@@ -54,45 +46,33 @@ export async function GET(request: NextRequest) {
         $facet: {
           summaries: [{
             $group: {
-              _id: "$provider",
+              _id: null,
               totalRequests: { $sum: 1 },
-              totalNeurons: { $sum: { $ifNull: ["$response.usage.neurons", 0] } },
-              totalPromptTokens: { $sum: { $ifNull: ["$usage.prompt_tokens", { $ifNull: ["$response.usage.prompt_tokens", 0] }] } },
-              totalCompletionTokens: { $sum: { $ifNull: ["$usage.completion_tokens", { $ifNull: ["$response.usage.completion_tokens", 0] }] } },
-              totalTokens: { $sum: { $ifNull: ["$usage.total_tokens", { $ifNull: ["$response.usage.total_tokens", 0] }] } },
+              totalPromptTokens: { $sum: { $ifNull: ["$usage.prompt_tokens", 0] } },
+              totalCompletionTokens: { $sum: { $ifNull: ["$usage.completion_tokens", 0] } },
+              totalTokens: { $sum: { $ifNull: ["$usage.total_tokens", 0] } },
               totalPdfBytes: { $sum: { $ifNull: ["$pdf_size", 0] } },
             },
           }],
           byDay: [{
             $group: {
-              _id: {
-                provider: "$provider",
-                day: { $dateToString: { format: "%Y-%m-%d", date: "$created_on" } },
-              },
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_on" } },
               requests: { $sum: 1 },
-              neurons: { $sum: { $ifNull: ["$usage.neurons", { $ifNull: ["$response.usage.neurons", 0] }] } },
-              totalTokens: { $sum: { $ifNull: ["$usage.total_tokens", { $ifNull: ["$response.usage.total_tokens", 0] }] } },
+              totalTokens: { $sum: { $ifNull: ["$usage.total_tokens", 0] } },
             },
-          }, { $sort: { "_id.day": 1 } }],
+          }, { $sort: { _id: 1 } }],
           requests: [
             { $sort: { created_on: -1 } },
             { $limit: 250 },
             {
               $project: {
                 _id: 0,
-                provider: 1,
                 createdOn: "$created_on",
                 pdfName: "$pdf_name",
                 model: 1,
-                promptTokens: {
-                  $ifNull: ["$usage.prompt_tokens", { $ifNull: ["$response.usage.prompt_tokens", 0] }],
-                },
-                completionTokens: {
-                  $ifNull: ["$usage.completion_tokens", { $ifNull: ["$response.usage.completion_tokens", 0] }],
-                },
-                totalTokens: {
-                  $ifNull: ["$usage.total_tokens", { $ifNull: ["$response.usage.total_tokens", 0] }],
-                },
+                promptTokens: { $ifNull: ["$usage.prompt_tokens", 0] },
+                completionTokens: { $ifNull: ["$usage.completion_tokens", 0] },
+                totalTokens: { $ifNull: ["$usage.total_tokens", 0] },
               },
             },
           ],
@@ -100,41 +80,18 @@ export async function GET(request: NextRequest) {
       },
     ]).toArray();
 
-    function formatProviderUsage(provider: string) {
-      const summary = ((result?.summaries ?? []) as ProviderSummary[])
-        .find((item) => item._id === provider) ?? {};
-      const totalRequests = summary.totalRequests ?? 0;
-      const totalNeurons = summary.totalNeurons ?? 0;
-      const byDay = ((result?.byDay ?? []) as ProviderDay[])
-        .filter((item) => item._id.provider === provider)
-        .map((item) => ({
-          _id: item._id.day,
-          requests: item.requests,
-          neurons: item.neurons,
-          totalTokens: item.totalTokens,
-        }));
-
-      return {
-        summary: {
-          totalRequests,
-          totalNeurons,
-          avgNeuronsPerRequest: totalRequests ? totalNeurons / totalRequests : 0,
-          totalPromptTokens: summary.totalPromptTokens ?? 0,
-          totalCompletionTokens: summary.totalCompletionTokens ?? 0,
-          totalTokens: summary.totalTokens ?? 0,
-          totalPdfBytes: summary.totalPdfBytes ?? 0,
-        },
-        byDay,
-      };
-    }
+    const summary = (result?.summaries?.[0] ?? {}) as UsageSummary;
 
     return NextResponse.json({
       range: { from: from?.toISOString() ?? null, to: to?.toISOString() ?? null },
-      providers: {
-        puter: formatProviderUsage("puter"),
-        worker: formatProviderUsage("worker"),
-        apinex: formatProviderUsage("apinex"),
+      summary: {
+        totalRequests: summary.totalRequests ?? 0,
+        totalPromptTokens: summary.totalPromptTokens ?? 0,
+        totalCompletionTokens: summary.totalCompletionTokens ?? 0,
+        totalTokens: summary.totalTokens ?? 0,
+        totalPdfBytes: summary.totalPdfBytes ?? 0,
       },
+      byDay: result?.byDay ?? [],
       requests: result?.requests ?? [],
     });
   } catch (error) {
@@ -151,9 +108,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     if (
-      (body.provider !== "puter" &&
-        body.provider !== "worker" &&
-        body.provider !== "apinex") ||
       typeof body.pdf_name !== "string" ||
       !Number.isInteger(body.pdf_size) ||
       typeof body.user_schema !== "object" ||
@@ -163,14 +117,12 @@ export async function POST(request: NextRequest) {
     }
 
     await logExtractionUsage({
-      provider: body.provider,
       pdfName: body.pdf_name,
       pdfSize: body.pdf_size,
       userSchema: body.user_schema,
       topKChunks: body.top_k_chunks,
       response: body.response,
       usage: body.usage,
-      usageDetails: body.usageDetails,
       model: body.model,
       customRules: body.custom_rules,
     });

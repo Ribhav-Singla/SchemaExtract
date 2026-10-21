@@ -14,7 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -27,12 +27,9 @@ import {
 
 import ThemeToggle from "../components/ThemeToggle";
 
-type ProviderName = "puter" | "worker" | "apinex";
-type ProviderUsage = {
+type UsageResponse = {
   summary: {
     totalRequests: number;
-    totalNeurons: number;
-    avgNeuronsPerRequest: number;
     totalPromptTokens: number;
     totalCompletionTokens: number;
     totalTokens: number;
@@ -41,15 +38,9 @@ type ProviderUsage = {
   byDay: Array<{
     _id: string;
     requests: number;
-    neurons: number;
     totalTokens: number;
   }>;
-};
-
-type UsageResponse = {
-  providers: Record<ProviderName, ProviderUsage>;
   requests: Array<{
-    provider: ProviderName;
     createdOn: string;
     pdfName: string;
     model?: string | null;
@@ -81,32 +72,6 @@ type SystemMetrics = {
   updatedAt: string;
 };
 
-const providerMeta: Record<
-  ProviderName,
-  {
-    label: string;
-    description: string;
-    color: string;
-  }
-> = {
-  puter: {
-    label: "Puter",
-    description: "Browser-based extraction",
-    color: "bg-accent",
-  },
-  worker: {
-    label: "Worker",
-    description: "Hosted extraction worker",
-    color: "bg-success",
-  },
-  apinex: {
-    label: "Apinex",
-    description: "OpenAI-compatible API",
-    color: "bg-[#8a6bc4]",
-  },
-};
-
-const providers: ProviderName[] = ["puter", "worker", "apinex"];
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(
     value,
@@ -123,18 +88,17 @@ function formatBytes(value: number) {
   return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
-function emptyUsage(): ProviderUsage {
+function emptyUsage(): UsageResponse {
   return {
     summary: {
       totalRequests: 0,
-      totalNeurons: 0,
-      avgNeuronsPerRequest: 0,
       totalPromptTokens: 0,
       totalCompletionTokens: 0,
       totalTokens: 0,
       totalPdfBytes: 0,
     },
     byDay: [],
+    requests: [],
   };
 }
 
@@ -159,15 +123,7 @@ export default function DashboardPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [pdfName, setPdfName] = useState("");
-  const [provider, setProvider] = useState<ProviderName | "all">("all");
-  const [usage, setUsage] = useState<UsageResponse>({
-    providers: {
-      puter: emptyUsage(),
-      worker: emptyUsage(),
-      apinex: emptyUsage(),
-    },
-    requests: [],
-  });
+  const [usage, setUsage] = useState<UsageResponse>(emptyUsage);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
@@ -243,37 +199,9 @@ export default function DashboardPage() {
     };
   }, [authenticated, loadSystemMetrics, loadUsage]);
 
-  const visibleProviders = useMemo(
-    () => (provider === "all" ? providers : [provider]),
-    [provider],
-  );
-  const chartRows = useMemo(() => {
-    const rows = new Map<string, Record<ProviderName, number>>();
-    visibleProviders.forEach((name) => {
-      usage.providers[name].byDay.forEach((day) => {
-        const row = rows.get(day._id) ?? { puter: 0, worker: 0, apinex: 0 };
-        row[name] = day.requests;
-        rows.set(day._id, row);
-      });
-    });
-    return Array.from(rows.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(-14);
-  }, [usage, visibleProviders]);
-
-  const maxRequests = Math.max(
-    1,
-    ...chartRows.flatMap(([, row]) =>
-      visibleProviders.map((name) => row[name]),
-    ),
-  );
-  const requestRows = useMemo(
-    () =>
-      usage.requests.filter((request) =>
-        visibleProviders.includes(request.provider),
-      ),
-    [usage.requests, visibleProviders],
-  );
+  const chartRows = usage.byDay.slice(-14);
+  const maxRequests = Math.max(1, ...chartRows.map((day) => day.requests));
+  const requestRows = usage.requests;
   const requestChartRows = requestRows.slice(0, 40).reverse();
   const requestChartData = requestChartRows.map((request) => ({
     ...request,
@@ -281,8 +209,11 @@ export default function DashboardPage() {
       hour: "2-digit",
       minute: "2-digit",
     }),
-    providerLabel: providerMeta[request.provider].label,
   }));
+  const avgTokensPerRequest = usage.summary.totalRequests
+    ? usage.summary.totalTokens / usage.summary.totalRequests
+    : 0;
+
   function login(event: FormEvent) {
     event.preventDefault();
     setLoginError("");
@@ -300,14 +231,7 @@ export default function DashboardPage() {
   function logout() {
     setAuthenticated(false);
     setSystemMetrics(null);
-    setUsage({
-      providers: {
-        puter: emptyUsage(),
-        worker: emptyUsage(),
-        apinex: emptyUsage(),
-      },
-      requests: [],
-    });
+    setUsage(emptyUsage());
   }
 
   if (!authenticated) {
@@ -406,8 +330,8 @@ export default function DashboardPage() {
               Extraction dashboard
             </h1>
             <p className="mt-3 max-w-xl text-muted">
-              Compare extraction activity, token usage, and document volume
-              across providers.
+              Track Claude extraction activity, token usage, and document
+              volume.
             </p>
           </div>
           <button
@@ -582,97 +506,65 @@ export default function DashboardPage() {
           ) : null}
         </section>
 
-        <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold">Providers</h2>
-            <p className="mt-1 text-sm text-muted">
-              {loading
-                ? "Updating usage data..."
-                : "Each provider is measured independently."}
-            </p>
+        <article className="mt-8 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="h-3 w-3 rounded-full bg-[#d97757]" />
+              <div>
+                <h2 className="font-semibold">Claude</h2>
+                <p className="text-xs text-muted">
+                  {loading ? "Updating usage data..." : "Anthropic Claude API"}
+                </p>
+              </div>
+            </div>
+            <Sparkles className="h-4 w-4 text-accent" />
           </div>
-          <div className="flex rounded-lg border border-border bg-surface p-1">
-            {(["all", ...providers] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setProvider(value)}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition ${provider === value ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
-              >
-                {value}
-              </button>
-            ))}
+
+          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">
+                {formatNumber(usage.summary.totalRequests)}
+              </p>
+              <p className="text-xs uppercase tracking-wide text-muted">
+                Requests
+              </p>
+            </div>
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">
+                {formatNumber(usage.summary.totalTokens)}
+              </p>
+              <p className="text-xs uppercase tracking-wide text-muted">
+                Tokens
+              </p>
+            </div>
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">
+                {formatNumber(avgTokensPerRequest)}
+              </p>
+              <p className="text-xs uppercase tracking-wide text-muted">
+                Avg. tokens / request
+              </p>
+            </div>
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">
+                {formatBytes(usage.summary.totalPdfBytes)}
+              </p>
+              <p className="text-xs uppercase tracking-wide text-muted">
+                PDF volume
+              </p>
+            </div>
           </div>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          {visibleProviders.map((name) => {
-            const item = usage.providers[name];
-            const meta = providerMeta[name];
-            return (
-              <article
-                key={name}
-                className="rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className={`h-3 w-3 rounded-full ${meta.color}`} />
-                    <div>
-                      <h3 className="font-semibold">{meta.label}</h3>
-                      <p className="text-xs text-muted">{meta.description}</p>
-                    </div>
-                  </div>
-                  <Sparkles className="h-4 w-4 text-accent" />
-                </div>
-
-                <div className="mt-6 grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-2xl font-semibold tabular-nums">
-                      {formatNumber(item.summary.totalRequests)}
-                    </p>
-                    <p className="text-xs uppercase tracking-wide text-muted">
-                      Requests
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-semibold tabular-nums">
-                      {formatNumber(item.summary.totalTokens)}
-                    </p>
-                    <p className="text-xs uppercase tracking-wide text-muted">
-                      Tokens
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold tabular-nums">
-                      {formatBytes(item.summary.totalPdfBytes)}
-                    </p>
-                    <p className="text-xs uppercase tracking-wide text-muted">
-                      PDF volume
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold tabular-nums">
-                      {formatNumber(item.summary.avgNeuronsPerRequest)}
-                    </p>
-                    <p className="text-xs uppercase tracking-wide text-muted">
-                      Avg. neurons
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-5 border-t border-border pt-4 text-xs text-muted">
-                  <span className="font-medium text-fg">
-                    {formatNumber(item.summary.totalPromptTokens)}
-                  </span>{" "}
-                  prompt /{" "}
-                  <span className="font-medium text-fg">
-                    {formatNumber(item.summary.totalCompletionTokens)}
-                  </span>{" "}
-                  completion tokens
-                </div>
-              </article>
-            );
-          })}
-        </div>
+          <div className="mt-5 border-t border-border pt-4 text-xs text-muted">
+            <span className="font-medium text-fg">
+              {formatNumber(usage.summary.totalPromptTokens)}
+            </span>{" "}
+            prompt /{" "}
+            <span className="font-medium text-fg">
+              {formatNumber(usage.summary.totalCompletionTokens)}
+            </span>{" "}
+            completion tokens
+          </div>
+        </article>
 
         <section className="mt-8 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] sm:p-6">
           <div className="flex items-start justify-between gap-4">
@@ -694,41 +586,25 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="mt-8 flex h-64 items-end gap-2 overflow-x-auto border-b border-border pb-0">
-              {chartRows.map(([day, values]) => (
+              {chartRows.map((day) => (
                 <div
-                  key={day}
+                  key={day._id}
                   className="flex min-w-12 flex-1 flex-col items-center gap-2"
                 >
                   <div className="flex h-48 w-full items-end justify-center gap-1">
-                    {visibleProviders.map((name) => (
-                      <div
-                        key={name}
-                        title={`${providerMeta[name].label}: ${values[name]} requests`}
-                        className={`min-w-2 flex-1 max-w-5 rounded-t ${providerMeta[name].color} transition-all`}
-                        style={{
-                          height: `${Math.max(values[name] ? 5 : 0, (values[name] / maxRequests) * 100)}%`,
-                        }}
-                      />
-                    ))}
+                    <div
+                      title={`${day.requests} requests`}
+                      className="min-w-2 flex-1 max-w-5 rounded-t bg-[#d97757] transition-all"
+                      style={{
+                        height: `${Math.max(day.requests ? 5 : 0, (day.requests / maxRequests) * 100)}%`,
+                      }}
+                    />
                   </div>
-                  <span className="text-[10px] text-muted">{day.slice(5)}</span>
+                  <span className="text-[10px] text-muted">{day._id.slice(5)}</span>
                 </div>
               ))}
             </div>
           )}
-          <div className="mt-5 flex flex-wrap gap-4">
-            {visibleProviders.map((name) => (
-              <span
-                key={name}
-                className="flex items-center gap-2 text-xs text-muted"
-              >
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${providerMeta[name].color}`}
-                />
-                {providerMeta[name].label}
-              </span>
-            ))}
-          </div>
         </section>
 
         <section className="mt-8 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] sm:p-6">
@@ -794,7 +670,7 @@ export default function DashboardPage() {
                         | (typeof requestChartData)[number]
                         | undefined;
                       return request
-                        ? `${request.providerLabel} · ${new Date(request.createdOn).toLocaleString()}`
+                        ? new Date(request.createdOn).toLocaleString()
                         : "";
                     }}
                   />
@@ -826,47 +702,35 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="mt-8 grid gap-4 lg:grid-cols-2">
-          {visibleProviders.map((name) => {
-            const item = usage.providers[name];
-            return (
-              <div
-                key={name}
-                className="rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]"
-              >
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-accent" />
-                  <h2 className="font-semibold">
-                    {providerMeta[name].label} daily detail
-                  </h2>
+        <section className="mt-8 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-accent" />
+            <h2 className="font-semibold">Daily detail</h2>
+          </div>
+          <div className="mt-4 divide-y divide-border">
+            {usage.byDay
+              .slice(-5)
+              .reverse()
+              .map((day) => (
+                <div
+                  key={day._id}
+                  className="flex items-center justify-between py-3 text-sm"
+                >
+                  <span className="font-mono text-xs text-muted">
+                    {day._id}
+                  </span>
+                  <span className="tabular-nums">
+                    <strong>{formatNumber(day.requests)}</strong> requests{" "}
+                    <span className="text-muted">
+                      · {formatNumber(day.totalTokens)} tokens
+                    </span>
+                  </span>
                 </div>
-                <div className="mt-4 divide-y divide-border">
-                  {item.byDay
-                    .slice(-5)
-                    .reverse()
-                    .map((day) => (
-                      <div
-                        key={day._id}
-                        className="flex items-center justify-between py-3 text-sm"
-                      >
-                        <span className="font-mono text-xs text-muted">
-                          {day._id}
-                        </span>
-                        <span className="tabular-nums">
-                          <strong>{formatNumber(day.requests)}</strong> requests{" "}
-                          <span className="text-muted">
-                            · {formatNumber(day.totalTokens)} tokens
-                          </span>
-                        </span>
-                      </div>
-                    ))}
-                  {item.byDay.length === 0 && (
-                    <p className="py-4 text-sm text-muted">No daily data.</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+              ))}
+            {usage.byDay.length === 0 && (
+              <p className="py-4 text-sm text-muted">No daily data.</p>
+            )}
+          </div>
         </section>
 
         <section className="mt-8 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] sm:p-6">
@@ -879,7 +743,6 @@ export default function DashboardPage() {
               <thead className="border-b border-border text-xs uppercase tracking-wider text-muted">
                 <tr>
                   <th className="px-3 py-3 font-semibold">Time</th>
-                  <th className="px-3 py-3 font-semibold">Provider</th>
                   <th className="px-3 py-3 font-semibold">PDF</th>
                   <th className="px-3 py-3 font-semibold">Model</th>
                   <th className="px-3 py-3 text-right font-semibold">Prompt</th>
@@ -897,14 +760,6 @@ export default function DashboardPage() {
                   >
                     <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-muted">
                       {new Date(request.createdOn).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={`h-2 w-2 rounded-full ${providerMeta[request.provider].color}`}
-                        />
-                        {providerMeta[request.provider].label}
-                      </span>
                     </td>
                     <td
                       className="max-w-48 truncate px-3 py-3"

@@ -24,7 +24,6 @@ import HeroIllustration from "./components/HeroIllustration";
 import JsonViewer from "./components/JsonViewer";
 import SchemaEditor from "./components/SchemaEditor";
 import ThemeToggle from "./components/ThemeToggle";
-import { runPuterExtraction } from "./lib/puter";
 import { hasPdfSignature, MAX_PDF_SIZE, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../lib/pdf";
 
 interface ExtractionUsage {
@@ -44,7 +43,6 @@ interface ExtractionChoice {
 interface ExtractionResponse {
   choices?: ExtractionChoice[];
   usage?: ExtractionUsage;
-  usageDetails?: Record<string, unknown>;
   response?: Record<string, unknown>;
   model?: string;
   created?: number;
@@ -427,33 +425,37 @@ export default function Home() {
     };
   }, [formattingOpen]);
 
-  // Start server-side model warm-up while the user is selecting a PDF and
-  // schema. The request is deliberately best-effort; analysis still shares
-  // the same singleton promise if warm-up has not finished yet.
-  useEffect(() => {
-    const startedAt = performance.now();
-
-    void fetch("/api/analyse")
-      .then((response) => {
-        if (!response.ok) {
-          console.warn("[model-warmup] request failed", {
-            status: response.status,
-            durationMs: Math.round(performance.now() - startedAt),
-          });
-        }
-      })
-      .catch((error) => {
-        console.warn("[model-warmup] request failed", {
-          durationMs: Math.round(performance.now() - startedAt),
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-  }, []);
-
   // --- Only used by the (currently hidden) chunks view below.
   // const [activeTab, setActiveTab] = useState<"all" | "top">("all");
   // const [resultTab, setResultTab] = useState<"chunks" | "extraction">("chunks");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const preparationRef = useRef<Promise<void> | null>(null);
+  const preparationIdRef = useRef(0);
+  const [uploading, setUploading] = useState(false);
+  // Upload progress shown until Layers 1 + 1.5 finish. The server can't report
+  // a true percentage, so it eases towards 95% and jumps to 100% once the
+  // "chunked" event arrives.
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadTickerRef = useRef<number | null>(null);
+
+  function stopUploadTicker() {
+    if (uploadTickerRef.current !== null) {
+      window.clearInterval(uploadTickerRef.current);
+      uploadTickerRef.current = null;
+    }
+  }
+
+  function startUploadTicker() {
+    stopUploadTicker();
+    setUploadProgress(0);
+    uploadTickerRef.current = window.setInterval(() => {
+      setUploadProgress((progress) =>
+        Math.min(95, progress + Math.max(0.5, (95 - progress) * 0.06)),
+      );
+    }, 150);
+  }
+
+  useEffect(() => stopUploadTicker, []);
 
   // Matches the backend's normalizeSchemaText() so the on-screen count and
   // the enforced limit never disagree about how long the schema is.
@@ -485,6 +487,10 @@ export default function Home() {
     if (!file) {
       setError("");
       setPdf(null);
+      preparationIdRef.current++;
+      preparationRef.current = null;
+      stopUploadTicker();
+      setUploading(false);
       return;
     }
 
@@ -504,6 +510,67 @@ export default function Home() {
 
     setError("");
     setPdf(file);
+    startPreparation(file);
+  }
+
+  // Run Layers 1-2 (PDF -> chunks -> embeddings) in the background as soon as a
+  // file is picked; "Run analysis" then only waits for whatever is left.
+  function startPreparation(file: File) {
+    const preparationId = ++preparationIdRef.current;
+    const formData = new FormData();
+    formData.append("pdf", file);
+    setUploading(true);
+    startUploadTicker();
+
+    const isCurrent = () => preparationId === preparationIdRef.current;
+
+    preparationRef.current = fetch("/api/prepare", {
+      method: "POST",
+      body: formData,
+    })
+      .then(async (response) => {
+        if (!response.ok || !response.body) {
+          throw new Error(`Preparation failed (${response.status})`);
+        }
+
+        // NDJSON progress events: "chunked" -> "ready" | "failed".
+        const reader = response.body
+          .pipeThrough(new TextDecoderStream())
+          .getReader();
+        let buffer = "";
+
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const { stage } = JSON.parse(line) as { stage: string };
+
+            if (stage === "chunked" && isCurrent()) {
+              stopUploadTicker();
+              setUploadProgress(100);
+              setUploading(false);
+            }
+          }
+        }
+
+        if (isCurrent()) {
+          stopUploadTicker();
+          setUploading(false);
+        }
+      })
+      // Best-effort: on failure /api/analyse simply does the full work itself.
+      .catch(() => {
+        if (isCurrent()) {
+          stopUploadTicker();
+          setUploading(false);
+        }
+      });
   }
 
   async function analyse(event: FormEvent<HTMLFormElement>) {
@@ -540,11 +607,11 @@ export default function Home() {
     setRunId((id) => id + 1);
     setLoading(true);
 
-    const extraction_provider =
-      process.env.NEXT_PUBLIC_EXTRACTION_PROVIDER ??
-      process.env.EXTRACTION_PROVIDER ??
-      "puter";
     try {
+      // Let any in-flight preparation finish first so both requests don't
+      // parse and embed the same PDF at once.
+      await preparationRef.current;
+
       const response = await fetch("/api/analyse", {
         method: "POST",
         body: formData,
@@ -555,90 +622,32 @@ export default function Home() {
         throw new Error(body.error ?? "Analysis failed");
       }
 
-      if (extraction_provider === "puter") {
-        const extracted = await runPuterExtraction({
-          schema: JSON.parse(schema),
-          chunks: body.ranked_chunks,
-          dateFormat,
-          stringCase,
-          numberFormat,
-          customRules,
-        });
-
-        setResult(body);
-        setExtractionResult({
-          response: extracted.response,
-          usageDetails: extracted.usageDetails,
-          model: process.env.NEXT_PUBLIC_PUTER_MODEL ?? "gpt-5.6-luna",
-        });
-        void logUsage({
-          provider: "puter",
-          topKChunks: body.ranked_chunks,
-          response: extracted.response,
-          usageDetails: extracted.usageDetails,
-          model: process.env.NEXT_PUBLIC_PUTER_MODEL ?? "gpt-5.6-luna",
-        });
-      } else if (extraction_provider === "apinex") {
-        const extractionResponse = await fetch("/api/extract/apinex", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_schema: JSON.parse(schema),
-            user_content: body.ranked_chunks,
-            pdf_size: pdf.size,
-            date_format: dateFormat,
-            string_case: stringCase,
-            number_format: numberFormat,
-            custom_rules: customRules,
-          }),
-        });
-        const extractionBody = await extractionResponse.json();
-        if (!extractionResponse.ok) {
-          throw new Error(extractionBody.error ?? "Apinex extraction failed");
-        }
-
-        setResult(body);
-        setExtractionResult(extractionBody);
-        void logUsage({
-          provider: "apinex",
-          topKChunks: body.ranked_chunks,
-          response: extractionBody.response,
-          usage: extractionBody.usage,
-          model: extractionBody.model,
-        });
-      } else {
-        const extractionResponse = await fetch(
-          "/api/extract",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              user_schema: JSON.parse(schema),
-              user_content: body.ranked_chunks,
-              pdf_size: pdf.size,
-              date_format: dateFormat,
-              string_case: stringCase,
-              number_format: numberFormat,
-              custom_rules: customRules,
-            }),
-          },
-        );
-        const extractionBody = await extractionResponse.json();
-
-        if (!extractionResponse.ok) {
-          throw new Error(extractionBody.error ?? "Extraction failed");
-        }
-
-        setResult(body);
-        setExtractionResult(extractionBody);
-        void logUsage({
-          provider: "worker",
-          topKChunks: body.ranked_chunks,
-          response: extractionBody.response ?? extractionBody,
-          usage: extractionBody.usage,
-          model: extractionBody.model,
-        });
+      const extractionResponse = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_schema: JSON.parse(schema),
+          user_content: body.ranked_chunks,
+          pdf_size: pdf.size,
+          date_format: dateFormat,
+          string_case: stringCase,
+          number_format: numberFormat,
+          custom_rules: customRules,
+        }),
+      });
+      const extractionBody = await extractionResponse.json();
+      if (!extractionResponse.ok) {
+        throw new Error(extractionBody.error ?? "Extraction failed");
       }
+
+      setResult(body);
+      setExtractionResult(extractionBody);
+      void logUsage({
+        topKChunks: body.ranked_chunks,
+        response: extractionBody.response,
+        usage: extractionBody.usage,
+        model: extractionBody.model,
+      });
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -650,32 +659,26 @@ export default function Home() {
     }
 
     async function logUsage({
-      provider,
       response,
       topKChunks,
       usage,
-      usageDetails,
       model,
     }: {
-      provider: "puter" | "worker" | "apinex";
       response: unknown;
       topKChunks: unknown[];
       usage?: unknown;
-      usageDetails?: unknown;
       model?: string;
     }) {
       const loggingResponse = await fetch("/api/usage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider,
           pdf_name: pdf?.name,
           pdf_size: pdf?.size,
           user_schema: JSON.parse(schema),
           top_k_chunks: topKChunks,
           response,
           usage,
-          usageDetails,
           model,
           custom_rules: customRules,
         }),
@@ -847,7 +850,22 @@ export default function Home() {
               />
 
               {pdf ? (
-                <div className="flex h-14 w-full max-w-full items-center justify-between gap-3 overflow-hidden rounded-xl bg-surface-2 px-4 shadow-sm ring-1 ring-border">
+                <div className="relative flex h-14 w-full max-w-full items-center justify-between gap-3 overflow-hidden rounded-xl bg-surface-2 px-4 shadow-sm ring-1 ring-border">
+                  {uploading && (
+                    <div
+                      role="progressbar"
+                      aria-label="Uploading PDF"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(uploadProgress)}
+                      className="absolute inset-x-0 bottom-0 h-1 bg-border"
+                    >
+                      <div
+                        className="h-full bg-accent transition-[width] duration-150 ease-linear"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  )}
                   <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger-soft text-danger">
                       <FileText className="h-4 w-4" strokeWidth={2} />
@@ -861,6 +879,8 @@ export default function Home() {
                       </p>
                       <p className="truncate whitespace-nowrap text-xs text-muted">
                         {formatBytes(pdf.size)}
+                        {uploading &&
+                          ` · Uploading ${Math.round(uploadProgress)}%`}
                       </p>
                     </div>
                   </div>
@@ -1399,28 +1419,6 @@ export default function Home() {
                           {extractionResult.usage.total_tokens}
                         </span>
                       </div>
-                    </div>
-                  </div>
-                )}
-                {extractionResult.usageDetails && (
-                  <div className="mt-4 rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
-                    <h3 className="font-semibold text-fg">Usage details</h3>
-                    <div className="mt-3 space-y-2 text-xs">
-                      {Object.entries(extractionResult.usageDetails).map(
-                        ([key, value]) => (
-                          <div
-                            key={key}
-                            className="flex justify-between gap-4 border-b border-border pb-2 last:border-0 last:pb-0"
-                          >
-                            <span className="text-muted">{key}</span>
-                            <span className="max-w-[70%] break-words text-right font-mono font-semibold text-fg">
-                              {typeof value === "object"
-                                ? JSON.stringify(value)
-                                : String(value)}
-                            </span>
-                          </div>
-                        ),
-                      )}
                     </div>
                   </div>
                 )}

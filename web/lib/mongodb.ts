@@ -7,10 +7,10 @@ declare global {
 }
 
 function getMongoClientPromise(): Promise<MongoClient> {
-	const uri = process.env.MONGODB_URI;
+	const uri = process.env.NEXT_MONGODB_URI;
 
 	if (!uri) {
-		throw new Error("MONGODB_URI is not configured");
+		throw new Error("NEXT_MONGODB_URI is not configured");
 	}
 
 	if (!global.schemaExtractMongoClientPromise) {

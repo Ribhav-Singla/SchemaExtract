@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -76,10 +77,14 @@ void warmEmbeddingModel().catch((error) => {
 const EMBEDDING_CACHE_LIMIT = 4000;
 const embeddingCache = new Map<string, number[]>();
 
+// Key on the exact text that gets embedded (see embedChunks) so identical text
+// reuses its vector across uploads and different text can never collide.
 function embeddingCacheKey(modelName: string, chunk: Chunk): string {
-  return `${modelName}::${String(chunk.chunkId ?? "")}::${Number(
-    chunk.charCount ?? 0,
-  )}`;
+  const textHash = createHash("sha256")
+    .update(String(chunk.text ?? ""))
+    .digest("hex");
+
+  return `${modelName}::${textHash}`;
 }
 
 function setEmbeddingCache(key: string, vector: number[]): void {
@@ -965,7 +970,7 @@ export class ChunkRetriever {
     return vector;
   }
 
-  private async embedChunks(chunks: Chunk[]): Promise<number[][]> {
+  async embedChunks(chunks: Chunk[]): Promise<number[][]> {
     const results: (number[] | undefined)[] = new Array(chunks.length);
     const missIndices: number[] = [];
     const missTexts: string[] = [];

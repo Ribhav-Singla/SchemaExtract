@@ -1,6 +1,6 @@
 # Schema Extract
 
-Schema Extract turns PDF documents into structured, evidence-backed JSON using configurable extraction providers.
+Schema Extract turns PDF documents into structured, evidence-backed JSON using Anthropic Claude.
 
 ## Getting started
 
@@ -19,32 +19,18 @@ Open [http://localhost:3000](http://localhost:3000) to use the extractor.
 Create `web/.env` with the required application settings. Never commit real credentials.
 
 ```env
-MONGODB_URI=your-mongodb-connection-string
-EXTRACTION_WORKER_URL=https://extraction-ai.ticketfusion.workers.dev
-EXTRACTION_PROVIDER=apinex
-NEXT_PUBLIC_EXTRACTION_PROVIDER=apinex
+NEXT_MONGODB_URI=your-mongodb-connection-string
 
-# Puter
-NEXT_PUBLIC_PUTER_MODEL=gpt-5.6-luna
-
-# Apinex
-APINEX_API_KEY=your-api-key
-APINEX_MODEL=free/gpt-6-luna
+# Claude
+NEXT_ANTHROPIC_API_KEY=your-anthropic-api-key
+NEXT_CLAUDE_MODEL=claude-haiku-5-5
 
 # Dashboard
-DASHBOARD_USERNAME=admin
-DASHBOARD_PASSWORD=change-this-password
 NEXT_PUBLIC_DASHBOARD_USERNAME=admin
 NEXT_PUBLIC_DASHBOARD_PASSWORD=change-this-password
 ```
 
-`NEXT_PUBLIC_EXTRACTION_PROVIDER` is used by the browser to select the provider. Supported values are:
-
-- `puter`
-- `worker`
-- `apinex`
-
-The Apinex API key is used by the server-side `/api/extract/apinex` route and should not be exposed to the browser. Rotate any key that has been shared in logs, screenshots, or source control.
+Every variable uses the `NEXT_` prefix. `NEXT_MONGODB_URI`, `NEXT_ANTHROPIC_API_KEY` and `NEXT_CLAUDE_MODEL` are only read server-side (`/api/extract`, `/api/usage`) and are never sent to the browser; only `NEXT_PUBLIC_*` variables are. `NEXT_CLAUDE_MODEL` defaults to `claude-haiku-5-5`. Rotate any key that has been shared in logs, screenshots, or source control.
 
 ## Dashboard
 
@@ -52,12 +38,11 @@ Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard) to view 
 
 The dashboard provides:
 
-- Separate Puter, Worker, and Apinex usage summaries.
+- Claude usage summary (requests, tokens, PDF volume).
 - Date range and PDF filename filters.
-- Provider filtering.
 - Requests-by-day visualization.
 - Interactive Recharts line chart for per-request token usage.
-- Hover details for request timestamp, provider, PDF name, and token count.
+- Hover details for request timestamp and token count.
 - Request-level token and model details.
 - Server configuration metrics for CPU, memory, and disk usage.
 - A separate server metrics refresh button.
@@ -66,17 +51,9 @@ The dashboard provides:
 
 The current dashboard login is a simple client-side UI gate using `NEXT_PUBLIC_DASHBOARD_USERNAME` and `NEXT_PUBLIC_DASHBOARD_PASSWORD`. It is not suitable for protecting sensitive production data because public environment variables are included in the browser bundle. Use a server-side authentication system before exposing the dashboard publicly.
 
-## Extraction providers
+## Extraction
 
-The default provider is configured through the environment. To use Apinex:
-
-```env
-NEXT_PUBLIC_EXTRACTION_PROVIDER=apinex
-APINEX_API_KEY=your-api-key
-APINEX_MODEL=free/gpt-6-luna
-```
-
-Successful extraction usage is logged to MongoDB through `/api/usage`. Apinex token usage is stored from the provider response and displayed separately from Puter and Worker usage.
+Ranked chunks are sent to Claude by the server-side `/api/extract` route. Successful extraction usage is logged to MongoDB through `/api/usage`.
 
 ## Useful commands
 
@@ -95,5 +72,4 @@ The retrieval model is downloaded into `web/models/transformers-cache/` and is
 ignored by Git because it is a generated deployment artifact. Run
 `npm run download:model` once before building or deploying. Production loads
 the model from this local cache and does not download it during the first user
-request. Opening the home page also calls `/api/model-status` to warm the
-process while the user selects a PDF and schema.
+request.

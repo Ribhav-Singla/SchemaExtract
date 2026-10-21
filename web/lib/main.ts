@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 
@@ -41,52 +42,61 @@ export interface PipelineResult {
 
 
 
-export async function runPipeline(
-    options: PipelineOptions
-): Promise<PipelineResult> {
-    const {
-        pdf,
-        outputDir = "output",
-        schema,
-        topK = 8,
-        threshold = 0.5,
-    } = options;
+// Layers 1 and 1.5 depend only on the PDF bytes, so their result is cached by
+// content hash. /api/prepare fills this when a file is picked, letting the
+// later /api/analyse call skip straight to retrieval. Promises are cached so a
+// request arriving mid-preparation waits for it instead of redoing the work.
+const PREPARED_CHUNKS_LIMIT = 50;
+const preparedChunks = new Map<string, Promise<Chunk[]>>();
 
+async function getChunks(
+    pdfPath: string,
+    outputPath: string,
+    fileStem: string
+): Promise<Chunk[]> {
+    const pdfHash = createHash("sha256")
+        .update(await fs.readFile(pdfPath))
+        .digest("hex");
 
+    const cached = preparedChunks.get(pdfHash);
 
-    const pdfPath = path.resolve(pdf);
+    if (cached) {
+        console.log(
+            "LAYER 1 + 1.5: cache hit (PDF already processed)"
+        );
+
+        return structuredClone(await cached);
+    }
+
+    if (preparedChunks.size >= PREPARED_CHUNKS_LIMIT) {
+        const oldestKey = preparedChunks.keys().next().value;
+
+        if (oldestKey !== undefined) {
+            preparedChunks.delete(oldestKey);
+        }
+    }
+
+    const chunksPromise = extractChunks(
+        pdfPath,
+        outputPath,
+        fileStem
+    );
+
+    preparedChunks.set(pdfHash, chunksPromise);
 
     try {
-        await fs.access(pdfPath);
-    } catch {
-        throw new Error(
-            `PDF not found: ${pdfPath}`
-        );
+        return structuredClone(await chunksPromise);
+    } catch (error) {
+        preparedChunks.delete(pdfHash);
+        throw error;
     }
+}
 
-    if (
-        path.extname(pdfPath).toLowerCase() !==
-        ".pdf"
-    ) {
-        throw new Error(
-            "Input file must be a PDF"
-        );
-    }
-
-
-    const outputPath =
-        path.resolve(/* turbopackIgnore: true */ outputDir);
-
-    await fs.mkdir(outputPath, {
-        recursive: true,
-    });
-
-    const fileName =
-        path.basename(pdfPath);
-
-    const fileStem =
-        path.parse(fileName).name;
-
+async function extractChunks(
+    pdfPath: string,
+    outputPath: string,
+    fileStem: string
+): Promise<Chunk[]> {
     const markdown =
         await pdfToMarkdown(pdfPath);
 
@@ -111,7 +121,6 @@ export async function runPipeline(
     console.log(
         "=".repeat(60)
     );
-
 
     const headers =
         findHeaders(markdown);
@@ -156,7 +165,7 @@ export async function runPipeline(
         `Sections detected: ${sections.length}`
     );
 
-    let chunks =
+    let chunks: Chunk[] =
         createChunks(sections);
 
     await saveJson(
@@ -227,6 +236,117 @@ export async function runPipeline(
         ),
         "Final chunks"
     );
+
+    return chunks;
+}
+
+
+
+async function resolvePipelinePaths(
+    pdf: string,
+    outputDir: string
+) {
+    const pdfPath = path.resolve(pdf);
+
+    try {
+        await fs.access(pdfPath);
+    } catch {
+        throw new Error(
+            `PDF not found: ${pdfPath}`
+        );
+    }
+
+    if (
+        path.extname(pdfPath).toLowerCase() !==
+        ".pdf"
+    ) {
+        throw new Error(
+            "Input file must be a PDF"
+        );
+    }
+
+
+    const outputPath =
+        path.resolve(/* turbopackIgnore: true */ outputDir);
+
+    await fs.mkdir(outputPath, {
+        recursive: true,
+    });
+
+    const fileName =
+        path.basename(pdfPath);
+
+    const fileStem =
+        path.parse(fileName).name;
+
+    return {
+        pdfPath,
+        outputPath,
+        fileStem,
+    };
+}
+
+
+
+export async function preparePipeline(
+    options: Pick<PipelineOptions, "pdf" | "outputDir">,
+    // Fired once Layers 1 + 1.5 are done, before the chunk embeddings start.
+    onChunksReady?: (totalChunks: number) => void
+): Promise<{ total_chunks: number }> {
+    const {
+        pdfPath,
+        outputPath,
+        fileStem,
+    } = await resolvePipelinePaths(
+        options.pdf,
+        options.outputDir ?? "output"
+    );
+
+    const chunks =
+        await getChunks(
+            pdfPath,
+            outputPath,
+            fileStem
+        );
+
+    onChunksReady?.(chunks.length);
+
+    // Embedding the chunks is the slow part of Layer 2 and needs no schema,
+    // so do it now; retrieval later only embeds the schema query.
+    await new ChunkRetriever().embedChunks(chunks);
+
+    return {
+        total_chunks: chunks.length,
+    };
+}
+
+
+
+export async function runPipeline(
+    options: PipelineOptions
+): Promise<PipelineResult> {
+    const {
+        pdf,
+        outputDir = "output",
+        schema,
+        topK = 15,
+        threshold = 0.5,
+    } = options;
+
+
+
+    const {
+        pdfPath,
+        outputPath,
+        fileStem,
+    } = await resolvePipelinePaths(pdf, outputDir);
+
+    const chunks =
+        await getChunks(
+            pdfPath,
+            outputPath,
+            fileStem
+        );
 
 
     let rankedChunks: Chunk[] = [];

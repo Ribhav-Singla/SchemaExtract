@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { randomUUID } from "crypto";
 
-import { runPipeline, type PipelineResult } from "./main";
+import { preparePipeline, runPipeline, type PipelineResult } from "./main";
 import {
   hasPdfSignature,
   MAX_PDF_SIZE,
@@ -34,12 +34,8 @@ export interface AnalysisPipelineResult {
   numberFormat?: string;
 }
 
-export async function runAnalysisPipeline(
-  request: Request,
-): Promise<AnalysisPipelineResult> {
-  const formData = await request.formData();
+async function readPdfUpload(formData: FormData): Promise<File> {
   const pdf = formData.get("pdf");
-  const schemaValue = formData.get("schema");
 
   if (!(pdf instanceof File) || pdf.size === 0) {
     throw new PipelineRequestError("A PDF file is required", 400);
@@ -53,6 +49,52 @@ export async function runAnalysisPipeline(
   if (!(await hasPdfSignature(pdf))) {
     throw new PipelineRequestError("The uploaded file is not a valid PDF", 400);
   }
+
+  return pdf;
+}
+
+async function withTemporaryPdf<T>(
+  pdf: File,
+  run: (pdfPath: string, outputDirectory: string) => Promise<T>,
+): Promise<T> {
+  const temporaryDirectory = path.join(
+    os.tmpdir(),
+    `schema-extract-${randomUUID()}`,
+  );
+
+  try {
+    const outputDirectory = path.join(temporaryDirectory, "output");
+    const pdfPath = path.join(temporaryDirectory, "input.pdf");
+    await fs.mkdir(temporaryDirectory, { recursive: true });
+    await fs.writeFile(pdfPath, Buffer.from(await pdf.arrayBuffer()));
+
+    return await run(pdfPath, outputDirectory);
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+export async function runPreparePipeline(
+  request: Request,
+  onChunksReady?: (totalChunks: number) => void,
+): Promise<{ total_chunks: number }> {
+  const pdf = await readPdfUpload(await request.formData());
+
+  return withTemporaryPdf(pdf, (pdfPath, outputDirectory) =>
+    preparePipeline(
+      { pdf: pdfPath, outputDir: outputDirectory },
+      onChunksReady,
+    ),
+  );
+}
+
+export async function runAnalysisPipeline(
+  request: Request,
+): Promise<AnalysisPipelineResult> {
+  const formData = await request.formData();
+  const pdf = await readPdfUpload(formData);
+  const schemaValue = formData.get("schema");
+
   if (typeof schemaValue !== "string") {
     throw new PipelineRequestError("A schema JSON object is required", 400);
   }
@@ -75,33 +117,19 @@ export async function runAnalysisPipeline(
     throw new PipelineRequestError("The schema must be a JSON object", 400);
   }
 
-  const temporaryDirectory = path.join(
-    os.tmpdir(),
-    `schema-extract-${randomUUID()}`,
-  );
-
-  try {
-    const outputDirectory = path.join(temporaryDirectory, "output");
-    const pdfPath = path.join(temporaryDirectory, "input.pdf");
-    await fs.mkdir(temporaryDirectory, { recursive: true });
-    await fs.writeFile(pdfPath, Buffer.from(await pdf.arrayBuffer()));
-
-    return {
-      result: await runPipeline({ pdf: pdfPath, outputDir: outputDirectory, schema }),
-      pdfName: pdf.name,
-      pdfSize: pdf.size,
-      schema,
-      dateFormat: typeof formData.get("date_format") === "string"
-        ? String(formData.get("date_format"))
-        : undefined,
-      stringCase: typeof formData.get("string_case") === "string"
-        ? String(formData.get("string_case"))
-        : undefined,
-      numberFormat: typeof formData.get("number_format") === "string"
-        ? String(formData.get("number_format"))
-        : undefined,
-    };
-  } finally {
-    await fs.rm(temporaryDirectory, { recursive: true, force: true });
-  }
+  return withTemporaryPdf(pdf, async (pdfPath, outputDirectory) => ({
+    result: await runPipeline({ pdf: pdfPath, outputDir: outputDirectory, schema }),
+    pdfName: pdf.name,
+    pdfSize: pdf.size,
+    schema,
+    dateFormat: typeof formData.get("date_format") === "string"
+      ? String(formData.get("date_format"))
+      : undefined,
+    stringCase: typeof formData.get("string_case") === "string"
+      ? String(formData.get("string_case"))
+      : undefined,
+    numberFormat: typeof formData.get("number_format") === "string"
+      ? String(formData.get("number_format"))
+      : undefined,
+  }));
 }

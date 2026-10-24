@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { randomUUID } from "crypto";
 
+import { validateCustomRules } from "./custom-rules";
 import { preparePipeline, runPipeline, type PipelineResult } from "./main";
 import {
   hasPdfSignature,
@@ -115,6 +116,13 @@ export async function runAnalysisPipeline(
   }
   if (!isSchemaObject(schema)) {
     throw new PipelineRequestError("The schema must be a JSON object", 400);
+  }
+
+  // Reject bad custom rules before the pipeline runs, so no vision calls are
+  // spent on a request /api/extract would refuse anyway.
+  const customRulesError = validateCustomRules(formData.get("custom_rules"));
+  if (customRulesError) {
+    throw new PipelineRequestError(customRulesError, 400);
   }
 
   return withTemporaryPdf(pdf, async (pdfPath, outputDirectory) => ({

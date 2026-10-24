@@ -44,3 +44,4 @@ next-env.d.ts
 
 # Downloaded Transformers.js model artifacts
 web/models/transformers-cache/
+web/models/model2vec/

@@ -16,6 +16,8 @@ const nextConfig: NextConfig = {
       "./node_modules/onnxruntime-node/bin/*/linux/x64/**/*",
       "./node_modules/onnxruntime-common/**/*",
       "./models/transformers-cache/**/*",
+      // Static Model2Vec weights, used when NEXT_EMBEDDING_PROVIDER=model2vec.
+      "./models/model2vec/**/*",
     ],
   },
 };

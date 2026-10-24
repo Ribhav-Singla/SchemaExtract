@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   FileText,
+  Braces,
   Loader2,
   Play,
   RotateCcw,
@@ -24,6 +25,13 @@ import HeroIllustration from "./components/HeroIllustration";
 import JsonViewer from "./components/JsonViewer";
 import SchemaEditor from "./components/SchemaEditor";
 import ThemeToggle from "./components/ThemeToggle";
+import {
+  DATE_FORMAT_OPTIONS,
+  MAX_CUSTOM_RULES_LENGTH,
+  NUMBER_FORMAT_OPTIONS,
+  STRING_CASE_OPTIONS,
+  validateCustomRules,
+} from "../lib/custom-rules";
 import { hasPdfSignature, MAX_PDF_SIZE, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../lib/pdf";
 
 interface ExtractionUsage {
@@ -92,30 +100,6 @@ function findInvalidSchemaType(node: unknown): string | null {
 
   return String(node);
 }
-
-const DATE_FORMAT_OPTIONS = [
-  "DD-MM-YYYY",
-  "MM-DD-YYYY",
-  "YYYY-MM-DD",
-  "DD-MM",
-  "DD Mon YYYY",
-  "Mon DD, YYYY",
-];
-
-const STRING_CASE_OPTIONS = [
-  "Proper Case",
-  "camelCase",
-  "PascalCase",
-  "UPPERCASE",
-  "lowercase",
-];
-
-const NUMBER_FORMAT_OPTIONS = [
-  "Plain",
-  "2 decimals",
-  "Comma-separated",
-  "Compact",
-];
 
 const EXAMPLE_SCHEMA = `{
   "research_area": "string",
@@ -387,9 +371,9 @@ export default function Home() {
   // instead of resuming from wherever the previous run left off.
   const [runId, setRunId] = useState(0);
   const [formattingOpen, setFormattingOpen] = useState(false);
-  const [dateFormat, setDateFormat] = useState(DATE_FORMAT_OPTIONS[0]);
-  const [stringCase, setStringCase] = useState(STRING_CASE_OPTIONS[0]);
-  const [numberFormat, setNumberFormat] = useState(NUMBER_FORMAT_OPTIONS[0]);
+  const [dateFormat, setDateFormat] = useState<string>(DATE_FORMAT_OPTIONS[0]);
+  const [stringCase, setStringCase] = useState<string>(STRING_CASE_OPTIONS[0]);
+  const [numberFormat, setNumberFormat] = useState<string>(NUMBER_FORMAT_OPTIONS[0]);
   const [customRules, setCustomRules] = useState("");
   const [customRulesOpen, setCustomRulesOpen] = useState(false);
   const [schemaCardHeight, setSchemaCardHeight] = useState<number | undefined>(undefined);
@@ -482,6 +466,7 @@ export default function Home() {
   }, [schema, schemaLength]);
 
   const schemaIsValid = schemaError === null;
+  const customRulesError = useMemo(() => validateCustomRules(customRules), [customRules]);
 
   async function pickFile(file: File | null) {
     if (!file) {
@@ -594,6 +579,12 @@ export default function Home() {
 
     if (!schemaIsValid) {
       setError(schemaError ?? "Schema must be valid JSON.");
+      return;
+    }
+
+    if (customRulesError) {
+      setCustomRulesOpen(true);
+      setError(customRulesError);
       return;
     }
 
@@ -1086,6 +1077,16 @@ export default function Home() {
                 </div>
                 <button
                   type="button"
+                  disabled={!schemaIsValid}
+                  title={schemaIsValid ? "Format schema" : "Fix the schema to format it"}
+                  onClick={() => setSchema(JSON.stringify(JSON.parse(schema), null, 2))}
+                  className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted"
+                >
+                  <Braces className="h-3 w-3" strokeWidth={2} />
+                  Format
+                </button>
+                <button
+                  type="button"
                   onClick={() => setSchema(EXAMPLE_SCHEMA)}
                   className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted transition hover:text-accent"
                 >
@@ -1121,7 +1122,7 @@ export default function Home() {
               </div>
               <span className="flex items-center gap-3">
                 <span className="font-mono text-[11px] tabular-nums text-muted">
-                  ({customRules.length.toLocaleString()}/2,000)
+                  ({customRules.length.toLocaleString()}/{MAX_CUSTOM_RULES_LENGTH.toLocaleString()})
                 </span>
                 <span
                   role="button"
@@ -1162,11 +1163,20 @@ export default function Home() {
                     id="custom-rules"
                     value={customRules}
                     onChange={(event) => setCustomRules(event.target.value)}
-                    maxLength={2000}
+                    maxLength={MAX_CUSTOM_RULES_LENGTH}
                     rows={5}
                     placeholder="Add extra instructions for the extraction model..."
-                    className="w-full resize-y rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm leading-6 text-fg outline-none transition placeholder:text-muted focus:border-accent"
+                    aria-invalid={customRulesError !== null}
+                    aria-describedby={customRulesError ? "custom-rules-error" : undefined}
+                    className={`w-full resize-y rounded-xl border bg-surface-2 px-4 py-3 text-sm leading-6 text-fg outline-none transition placeholder:text-muted ${
+                      customRulesError ? "border-danger focus:border-danger" : "border-border focus:border-accent"
+                    }`}
                   />
+                  {customRulesError && (
+                    <p id="custom-rules-error" className="mt-2 text-xs text-danger">
+                      {customRulesError}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

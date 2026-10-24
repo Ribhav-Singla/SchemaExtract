@@ -9,7 +9,26 @@ import {
 } from "@huggingface/transformers";
 import natural from "natural";
 
+import {
+  embedWithModel2Vec,
+  loadModel2Vec,
+  MODEL2VEC_MODEL,
+} from "./model2vec";
 import type { Chunk } from "./types";
+
+// Selects how chunk/query vectors for the semantic score are produced:
+//   transformers -> Transformers.js + onnxruntime (EMBEDDING_MODEL below)
+//   model2vec    -> static Model2Vec embeddings in plain TypeScript (MODEL2VEC_MODEL)
+export type EmbeddingProvider = "transformers" | "model2vec";
+export const NEXT_EMBEDDING_PROVIDER: EmbeddingProvider =
+  process.env.NEXT_EMBEDDING_PROVIDER === "model2vec" ? "model2vec" : "transformers";
+
+// Selects the keyword-match algorithm behind the lexical score:
+//   tfidf -> natural.TfIdf (raw term counts, no length normalisation)
+//   bm25  -> Okapi BM25 (saturating term frequency + length normalisation)
+export type LexicalScorer = "tfidf" | "bm25";
+export const NEXT_LEXICAL_SCORER: LexicalScorer =
+  process.env.NEXT_LEXICAL_SCORER === "bm25" ? "bm25" : "tfidf";
 
 // The deployment build can populate this directory with the model artifacts.
 // Keep /tmp as the development and fallback cache so local runs do not need a
@@ -69,9 +88,15 @@ export function warmEmbeddingModel(): Promise<FeatureExtractionPipeline> {
   return loadEmbeddingModel(EMBEDDING_MODEL);
 }
 
-void warmEmbeddingModel().catch((error) => {
-  console.error("Embedding model startup warm-up failed", error);
-});
+if (NEXT_EMBEDDING_PROVIDER === "model2vec") {
+  void loadModel2Vec().catch((error) => {
+    console.error("Model2Vec startup warm-up failed", error);
+  });
+} else {
+  void warmEmbeddingModel().catch((error) => {
+    console.error("Embedding model startup warm-up failed", error);
+  });
+}
 
 
 const EMBEDDING_CACHE_LIMIT = 4000;
@@ -656,9 +681,72 @@ function dotProduct(a: number[], b: number[]): number {
   return result;
 }
 
+// k1 caps how much repeating a term helps; b sets how strongly long chunks
+// are penalised. 1.2 / 0.75 are the standard Okapi defaults.
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+const BM25_STOPWORDS = new Set(natural.stopwords);
+
+function bm25Tokens(text: string): string[] {
+  return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+    .filter((token) => !BM25_STOPWORDS.has(token))
+    .map((token) => natural.PorterStemmer.stem(token));
+}
+
+export function bm25Scores(chunks: Chunk[], queryTerms: string[]): number[] {
+  const documents = chunks.map((chunk) => bm25Tokens(String(chunk.text)));
+  // Each query term counts once: expanded terms overlap across schema fields,
+  // and duplicates would silently up-weight whichever word recurs most.
+  const query = Array.from(new Set(queryTerms.flatMap(bm25Tokens)));
+
+  if (documents.length === 0 || query.length === 0) {
+    return new Array(chunks.length).fill(0);
+  }
+
+  const termCounts = documents.map((tokens) => {
+    const counts = new Map<string, number>();
+    for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+    return counts;
+  });
+
+  const averageLength =
+    documents.reduce((sum, tokens) => sum + tokens.length, 0) / documents.length || 1;
+
+  const idf = new Map<string, number>();
+  for (const term of query) {
+    const documentFrequency = termCounts.filter((counts) => counts.has(term)).length;
+    idf.set(
+      term,
+      Math.log(1 + (documents.length - documentFrequency + 0.5) / (documentFrequency + 0.5)),
+    );
+  }
+
+  const scores = termCounts.map((counts, index) => {
+    const lengthRatio = documents[index].length / averageLength;
+    let score = 0;
+
+    for (const term of query) {
+      const frequency = counts.get(term) ?? 0;
+      if (frequency === 0) continue;
+
+      score += (idf.get(term) ?? 0) *
+        (frequency * (BM25_K1 + 1)) /
+        (frequency + BM25_K1 * (1 - BM25_B + BM25_B * lengthRatio));
+    }
+
+    return score;
+  });
+
+  return normalizeScores(scores);
+}
+
 export function lexicalScores(chunks: Chunk[], queryTerms: string[]): number[] {
   if (chunks.length === 0 || queryTerms.length === 0) {
     return new Array(chunks.length).fill(0);
+  }
+
+  if (NEXT_LEXICAL_SCORER === "bm25") {
+    return bm25Scores(chunks, queryTerms);
   }
 
   const texts: string[] = chunks.map((chunk) => String(chunk.text));
@@ -924,8 +1012,15 @@ export interface RetrieveOptions {
 export class ChunkRetriever {
   private embeddingModelName: string;
 
-  constructor(embeddingModel: string = EMBEDDING_MODEL) {
-    this.embeddingModelName = embeddingModel;
+  private provider: EmbeddingProvider;
+
+  constructor(
+    embeddingModel?: string,
+    provider: EmbeddingProvider = NEXT_EMBEDDING_PROVIDER,
+  ) {
+    this.provider = provider;
+    this.embeddingModelName = embeddingModel ??
+      (provider === "model2vec" ? MODEL2VEC_MODEL : EMBEDDING_MODEL);
   }
 
   private async loadModel(): Promise<FeatureExtractionPipeline> {
@@ -938,6 +1033,21 @@ export class ChunkRetriever {
     }
 
     const startedAt = performance.now();
+
+    if (this.provider === "model2vec") {
+      const staticModel = await loadModel2Vec(this.embeddingModelName);
+      const vectors = texts.map((text) => embedWithModel2Vec(staticModel, text));
+
+      logEmbeddingEvent("batch_complete", {
+        model: this.embeddingModelName,
+        provider: this.provider,
+        count: texts.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+
+      return vectors;
+    }
+
     const model = await this.loadModel();
 
     const output = await model(texts, {

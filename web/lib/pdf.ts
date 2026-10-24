@@ -1,4 +1,7 @@
-export const MAX_PDF_SIZE = 7 * 1024 * 1024;
+// Vercel rejects function request bodies over 4.5 MB with a plain-text 413
+// before our code runs; 4 MB leaves room for the multipart form overhead.
+export const MAX_PDF_SIZE = 4 * 1024 * 1024;
+export const MAX_PDF_SIZE_LABEL = `${MAX_PDF_SIZE / (1024 * 1024)} MB`;
 export const MAX_SCHEMA_LENGTH = 2_000;
 
 // Browsers normalize bare "\n" line breaks to "\r\n" when serializing a

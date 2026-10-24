@@ -8,6 +8,7 @@ import { preparePipeline, runPipeline, type PipelineResult } from "./main";
 import {
   hasPdfSignature,
   MAX_PDF_SIZE,
+  MAX_PDF_SIZE_LABEL,
   MAX_SCHEMA_LENGTH,
   normalizeSchemaText,
 } from "./pdf";
@@ -42,7 +43,7 @@ async function readPdfUpload(formData: FormData): Promise<File> {
     throw new PipelineRequestError("A PDF file is required", 400);
   }
   if (pdf.size > MAX_PDF_SIZE) {
-    throw new PipelineRequestError("The PDF must be 7 MB or smaller", 413);
+    throw new PipelineRequestError(`The PDF must be ${MAX_PDF_SIZE_LABEL} or smaller`, 413);
   }
   if (path.extname(pdf.name).toLowerCase() !== ".pdf") {
     throw new PipelineRequestError("The uploaded file must be a PDF", 400);

@@ -32,7 +32,7 @@ import {
   STRING_CASE_OPTIONS,
   validateCustomRules,
 } from "../lib/custom-rules";
-import { hasPdfSignature, MAX_PDF_SIZE, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../lib/pdf";
+import { hasPdfSignature, MAX_PDF_SIZE, MAX_PDF_SIZE_LABEL, MAX_SCHEMA_LENGTH, normalizeSchemaText } from "../lib/pdf";
 
 interface ExtractionUsage {
   prompt_tokens: number;
@@ -229,6 +229,22 @@ const PIPELINE_STAGES = [
 ] as const;
 
 const STAGE_INTERVAL_MS = 1800;
+
+// Platform errors (e.g. Vercel's 413 "Request Entity Too Large") arrive as
+// plain text, so fall back to the raw text instead of throwing a JSON
+// SyntaxError that hides the real cause.
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const message = response.status === 413
+      ? `The upload is too large. The PDF must be ${MAX_PDF_SIZE_LABEL} or smaller.`
+      : text.trim().slice(0, 200) || `Request failed (${response.status})`;
+    return { error: message };
+  }
+}
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -480,7 +496,7 @@ export default function Home() {
     }
 
     if (file.size > MAX_PDF_SIZE) {
-      setError("The PDF must be 7 MB or smaller.");
+      setError(`The PDF must be ${MAX_PDF_SIZE_LABEL} or smaller.`);
       return;
     }
 
@@ -573,7 +589,7 @@ export default function Home() {
     }
 
     if (pdf.size > MAX_PDF_SIZE) {
-      setError("The PDF must be 7 MB or smaller.");
+      setError(`The PDF must be ${MAX_PDF_SIZE_LABEL} or smaller.`);
       return;
     }
 
@@ -607,7 +623,7 @@ export default function Home() {
         method: "POST",
         body: formData,
       });
-      const body = await response.json();
+      const body = await readJsonResponse(response);
 
       if (!response.ok) {
         throw new Error(body.error ?? "Analysis failed");
@@ -626,7 +642,7 @@ export default function Home() {
           custom_rules: customRules,
         }),
       });
-      const extractionBody = await extractionResponse.json();
+      const extractionBody = await readJsonResponse(extractionResponse);
       if (!extractionResponse.ok) {
         throw new Error(extractionBody.error ?? "Extraction failed");
       }

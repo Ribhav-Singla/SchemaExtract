@@ -58,8 +58,10 @@ export async function pdfToMarkdown(
 
     // pdf-parse's ESM build renders with pdfjs-dist, which pins its own
     // @napi-rs/canvas; a Path2D from any other copy fails in ctx.fill().
+    // Resolve via the entry pdf-parse actually imports: it is always traced into
+    // serverless bundles, whereas pdfjs-dist/package.json is not.
     const pdfjsRequire = createRequire(
-        createRequire(PDF_PARSE_PACKAGE_JSON).resolve("pdfjs-dist/package.json")
+        createRequire(PDF_PARSE_PACKAGE_JSON).resolve("pdfjs-dist/legacy/build/pdf.mjs")
     );
     const { DOMMatrix, ImageData, Path2D } =
         pdfjsRequire("@napi-rs/canvas") as typeof import("@napi-rs/canvas");

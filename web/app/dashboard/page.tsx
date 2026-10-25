@@ -25,6 +25,7 @@ import {
   YAxis,
 } from "recharts";
 
+import RunDetails from "../components/RunDetails";
 import ThemeToggle from "../components/ThemeToggle";
 
 type UsageResponse = {
@@ -41,6 +42,8 @@ type UsageResponse = {
     totalTokens: number;
   }>;
   requests: Array<{
+    id: string;
+    hasTrace: boolean;
     createdOn: string;
     pdfName: string;
     model?: string | null;
@@ -135,6 +138,10 @@ export default function DashboardPage() {
   );
   const [systemError, setSystemError] = useState("");
   const [systemLoading, setSystemLoading] = useState(false);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
+    null,
+  );
+  const closeRunDetails = useCallback(() => setSelectedRequestId(null), []);
 
   const loadUsage = useCallback(
     async (event?: FormEvent, showLoading = true) => {
@@ -232,6 +239,7 @@ export default function DashboardPage() {
     setAuthenticated(false);
     setSystemMetrics(null);
     setUsage(emptyUsage());
+    setSelectedRequestId(null);
   }
 
   if (!authenticated) {
@@ -738,6 +746,9 @@ export default function DashboardPage() {
             <FileText className="h-4 w-4 text-accent" />
             <h2 className="font-semibold">Request details</h2>
           </div>
+          <p className="mt-1 text-sm text-muted">
+            Click a request to open its full pipeline log and stage evaluation.
+          </p>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="border-b border-border text-xs uppercase tracking-wider text-muted">
@@ -755,8 +766,16 @@ export default function DashboardPage() {
               <tbody className="divide-y divide-border">
                 {requestRows.slice(0, 100).map((request, index) => (
                   <tr
-                    key={`${request.createdOn}-${index}`}
-                    className="transition hover:bg-surface-2"
+                    key={request.id ?? `${request.createdOn}-${index}`}
+                    onClick={() => setSelectedRequestId(request.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedRequestId(request.id);
+                      }
+                    }}
+                    tabIndex={0}
+                    className="cursor-pointer transition hover:bg-surface-2 focus:bg-surface-2 focus:outline-none"
                   >
                     <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-muted">
                       {new Date(request.createdOn).toLocaleString()}
@@ -766,6 +785,11 @@ export default function DashboardPage() {
                       title={request.pdfName}
                     >
                       {request.pdfName}
+                      {request.hasTrace && (
+                        <span className="ml-2 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
+                          trace
+                        </span>
+                      )}
                     </td>
                     <td className="max-w-40 truncate px-3 py-3 font-mono text-xs text-muted">
                       {request.model ?? "—"}
@@ -791,6 +815,13 @@ export default function DashboardPage() {
           </div>
         </section>
       </section>
+      {selectedRequestId && (
+        <RunDetails
+          key={selectedRequestId}
+          requestId={selectedRequestId}
+          onClose={closeRunDetails}
+        />
+      )}
     </main>
   );
 }

@@ -651,6 +651,7 @@ export default function Home() {
       setExtractionResult(extractionBody);
       void logUsage({
         topKChunks: body.ranked_chunks,
+        traceId: body.trace_id,
         response: extractionBody.response,
         usage: extractionBody.usage,
         model: extractionBody.model,
@@ -668,11 +669,13 @@ export default function Home() {
     async function logUsage({
       response,
       topKChunks,
+      traceId,
       usage,
       model,
     }: {
       response: unknown;
       topKChunks: unknown[];
+      traceId?: string | null;
       usage?: unknown;
       model?: string;
     }) {
@@ -688,6 +691,7 @@ export default function Home() {
           usage,
           model,
           custom_rules: customRules,
+          trace_id: traceId,
         }),
       });
 

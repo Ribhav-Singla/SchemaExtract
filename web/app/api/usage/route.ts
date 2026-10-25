@@ -67,6 +67,8 @@ export async function GET(request: NextRequest) {
             {
               $project: {
                 _id: 0,
+                id: { $toString: "$_id" },
+                hasTrace: { $ne: [{ $ifNull: ["$trace_id", null] }, null] },
                 createdOn: "$created_on",
                 pdfName: "$pdf_name",
                 model: 1,
@@ -125,6 +127,7 @@ export async function POST(request: NextRequest) {
       usage: body.usage,
       model: body.model,
       customRules: body.custom_rules,
+      traceId: typeof body.trace_id === "string" ? body.trace_id : null,
     });
 
     return NextResponse.json({ logged: true });

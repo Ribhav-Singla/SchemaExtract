@@ -20,7 +20,7 @@ import {
 } from "./src/storage";
 
 import { ChunkRetriever } from "./src/retriever";
-import type { Chunk } from "./src/types";
+import type { Chunk, Header, Section } from "./src/types";
 
 
 
@@ -38,6 +38,29 @@ export interface PipelineResult {
     top_k: number;
     threshold: number;
     ranked_chunks: Chunk[];
+    trace: PipelineTrace;
+}
+
+// Intermediate output of every layer, kept so a run can be inspected stage by
+// stage on the dashboard.
+export interface DocumentTrace {
+    markdown: string;
+    headers: Header[];
+    sections: Section[];
+    timings: {
+        pdf_to_markdown_ms: number;
+        chunking_ms: number;
+    };
+}
+
+export interface PipelineTrace extends DocumentTrace {
+    cache_hit: boolean;
+    retrieval_ms: number;
+}
+
+interface PreparedDocument {
+    chunks: Chunk[];
+    trace: DocumentTrace;
 }
 
 
@@ -47,13 +70,13 @@ export interface PipelineResult {
 // later /api/analyse call skip straight to retrieval. Promises are cached so a
 // request arriving mid-preparation waits for it instead of redoing the work.
 const PREPARED_CHUNKS_LIMIT = 50;
-const preparedChunks = new Map<string, Promise<Chunk[]>>();
+const preparedChunks = new Map<string, Promise<PreparedDocument>>();
 
 async function getChunks(
     pdfPath: string,
     outputPath: string,
     fileStem: string
-): Promise<Chunk[]> {
+): Promise<PreparedDocument & { cacheHit: boolean }> {
     const pdfHash = createHash("sha256")
         .update(await fs.readFile(pdfPath))
         .digest("hex");
@@ -65,7 +88,7 @@ async function getChunks(
             "LAYER 1 + 1.5: cache hit (PDF already processed)"
         );
 
-        return structuredClone(await cached);
+        return { ...structuredClone(await cached), cacheHit: true };
     }
 
     if (preparedChunks.size >= PREPARED_CHUNKS_LIMIT) {
@@ -85,7 +108,7 @@ async function getChunks(
     preparedChunks.set(pdfHash, chunksPromise);
 
     try {
-        return structuredClone(await chunksPromise);
+        return { ...structuredClone(await chunksPromise), cacheHit: false };
     } catch (error) {
         preparedChunks.delete(pdfHash);
         throw error;
@@ -96,9 +119,16 @@ async function extractChunks(
     pdfPath: string,
     outputPath: string,
     fileStem: string
-): Promise<Chunk[]> {
+): Promise<PreparedDocument> {
+    const markdownStartedAt = performance.now();
+
     const markdown =
         await pdfToMarkdown(pdfPath);
+
+    const pdfToMarkdownMs =
+        Math.round(performance.now() - markdownStartedAt);
+
+    const chunkingStartedAt = performance.now();
 
     await saveMarkdown(
         markdown,
@@ -237,7 +267,20 @@ async function extractChunks(
         "Final chunks"
     );
 
-    return chunks;
+    return {
+        chunks,
+        trace: {
+            markdown,
+            headers,
+            sections,
+            timings: {
+                pdf_to_markdown_ms: pdfToMarkdownMs,
+                chunking_ms: Math.round(
+                    performance.now() - chunkingStartedAt
+                ),
+            },
+        },
+    };
 }
 
 
@@ -302,7 +345,7 @@ export async function preparePipeline(
         options.outputDir ?? "output"
     );
 
-    const chunks =
+    const { chunks } =
         await getChunks(
             pdfPath,
             outputPath,
@@ -341,13 +384,19 @@ export async function runPipeline(
         fileStem,
     } = await resolvePipelinePaths(pdf, outputDir);
 
-    const chunks =
+    const {
+        chunks,
+        trace: documentTrace,
+        cacheHit,
+    } =
         await getChunks(
             pdfPath,
             outputPath,
             fileStem
         );
 
+
+    let retrievalMs = 0;
 
     let rankedChunks: Chunk[] = [];
 
@@ -392,6 +441,8 @@ export async function runPipeline(
             "=".repeat(60)
         );
 
+        const retrievalStartedAt = performance.now();
+
         const retriever =
             new ChunkRetriever();
 
@@ -402,6 +453,9 @@ export async function runPipeline(
                 topK,
                 threshold
             );
+
+        retrievalMs =
+            Math.round(performance.now() - retrievalStartedAt);
 
         await saveJson(
             {
@@ -446,5 +500,10 @@ export async function runPipeline(
         top_k: rankedChunks.length,
         threshold,
         ranked_chunks: rankedChunks,
+        trace: {
+            ...documentTrace,
+            cache_hit: cacheHit,
+            retrieval_ms: retrievalMs,
+        },
     };
 }

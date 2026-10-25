@@ -9,6 +9,7 @@ export interface ExtractionUsageLog {
   usage?: unknown;
   model?: string;
   customRules?: string;
+  traceId?: string | null;
 }
 
 export async function logExtractionUsage(log: ExtractionUsageLog): Promise<void> {
@@ -25,5 +26,6 @@ export async function logExtractionUsage(log: ExtractionUsageLog): Promise<void>
     usage: log.usage ?? null,
     model: log.model ?? null,
     custom_rules: log.customRules ?? "",
+    trace_id: log.traceId ?? null,
   });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSchemaExtractDatabase } from "../../../lib/mongodb";
+import { getRunDetails } from "../../../lib/pipeline-trace";
 import { logExtractionUsage } from "../../../lib/usage-logging";
 
 export const runtime = "nodejs";
@@ -23,8 +24,32 @@ type UsageSummary = {
 };
 
 export async function GET(request: NextRequest) {
+  const params = request.nextUrl.searchParams;
+  const id = params.get("id");
+
+  if (id) {
+    // ?id=<extraction id> returns one run's details instead of the summary.
+    try {
+      const details = await getRunDetails(id);
+
+      if (!details) {
+        return NextResponse.json({ error: "Request not found" }, { status: 404 });
+      }
+      return NextResponse.json(details);
+    } catch (error) {
+      console.error("Loading request details failed", error);
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Could not load request" },
+        { status: 500 },
+      );
+    }
+  } else {
+    return getUsageSummary(params);
+  }
+}
+
+async function getUsageSummary(params: URLSearchParams) {
   try {
-    const params = request.nextUrl.searchParams;
     const from = parseDateParam(params.get("from"), "from");
     const to = parseDateParam(params.get("to"), "to");
     const pdfName = params.get("pdf_name");

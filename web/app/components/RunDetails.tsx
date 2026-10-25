@@ -184,7 +184,7 @@ export default function RunDetails({
   useEffect(() => {
     // The parent keys this component by requestId, so state starts fresh.
     let cancelled = false;
-    fetch(`/api/usage/${requestId}`)
+    fetch(`/api/usage?id=${encodeURIComponent(requestId)}`)
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error ?? "Could not load request");

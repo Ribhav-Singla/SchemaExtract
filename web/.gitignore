@@ -43,5 +43,5 @@ next-env.d.ts
 **/.wrangler/**
 
 # Downloaded Transformers.js model artifacts
-web/models/transformers-cache/
-web/models/model2vec/
+models/transformers-cache/
+models/model2vec/
